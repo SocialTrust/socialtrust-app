@@ -385,7 +385,10 @@ export function useSocialTrust() {
   const { address: wagmiAddress, isConnected: wagmiIsConnected, chainId } = useAccount()
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const { switchChainAsync } = useSwitchChain()
-  const { data: walletClient } = useWalletClient()
+  // Pinned to the app chain: without chainId, wagmi yields no client at all
+  // while the wallet sits on an unsupported network, which made every write
+  // fail with a bogus "connect first" before the switch prompt could run.
+  const { data: walletClient } = useWalletClient({ chainId: appConfig.chainId })
   const { openConnectModal } = useConnectModal()
 
   const [snapshot, setSnapshot] = useState<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
@@ -1261,7 +1264,23 @@ export function useSocialTrust() {
       setTx({ pending: false, label: '', success: `${label} simulated in mock mode.` })
       return true
     }
-    if (!walletClient || !account) {
+    if (!account) {
+      setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
+      return false
+    }
+    if (!walletClient) {
+      // A connected wallet can still yield no client (client query not yet
+      // resolved, or an unsupported chain slipped past the pinned hook), so
+      // ask for the network switch rather than claiming it is disconnected.
+      if (isConnected) {
+        try {
+          await switchChainAsync({ chainId: appConfig.chainId })
+          setTx({ pending: false, label: '', error: `Wallet switched to ${appConfig.chainName} — tap the button again.` })
+        } catch {
+          setTx({ pending: false, label: '', error: `Open your wallet and switch to ${appConfig.chainName}, then try again.` })
+        }
+        return false
+      }
       setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
       return false
     }
@@ -1353,7 +1372,7 @@ export function useSocialTrust() {
       await refresh().catch(() => undefined)
       return false
     }
-  }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, readErc20, refresh, walletClient])
+  }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, readErc20, refresh, switchChainAsync, walletClient])
 
   const actions = useMemo(() => ({
     approveUsdc: () => write('approveUsdc', [], 'Approve USDC'),
