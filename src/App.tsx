@@ -119,8 +119,14 @@ function App() {
                   <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
                 </button>
                 <div className="topBarMetrics" aria-label="Account balance and reputation">
-                  <span>{topBarBalance} USDC</span>
-                  <span>Rep {topBarRep}</span>
+                  <span className="metricLine">
+                    <span className="metricSymbol metricSymbolUsdc" aria-hidden="true">$</span>
+                    <span className="metricValue">{topBarBalance}</span>
+                  </span>
+                  <span className="metricLine">
+                    <span className="metricSymbol metricSymbolRep" aria-hidden="true">{'\u2605\uFE0E'}</span>
+                    <span className="metricValue">{topBarRep}</span>
+                  </span>
                 </div>
                 {profileOpen ? (
                   <ProfilePopover
