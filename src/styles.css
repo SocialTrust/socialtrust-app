@@ -1403,10 +1403,29 @@ body {
   font-weight: 500;
 }
 
-.menuRowValue {
+.menuTermsList {
+  display: grid;
+}
+
+.menuTermsList div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+.menuTermsList span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.menuTermsList strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .menuOwnerBadge {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, ChevronUp, FileText, LogOut, Settings, User, Wallet } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, FileText, LogOut, Settings, Wallet } from 'lucide-react'
 import type { Address } from 'viem'
 import type { ContractConfig } from '../types'
 import { formatUsdc, secondsToLabel, shortAddress } from '../lib/format'
@@ -11,17 +11,15 @@ type MainMenuSheetProps = {
   isConnected: boolean
   isOwner: boolean
   config?: ContractConfig
-  appBalance?: bigint
   onClose: () => void
   onConnect: () => void
   onDisconnect: () => void
   onStart: () => void
   onOpenWallet: () => void
   onOpenAdmin: () => void
-  onNavigate: (path: string) => void
 }
 
-export function MainMenuSheet({ open, account, isConnected, isOwner, config, appBalance, onClose, onConnect, onDisconnect, onStart, onOpenWallet, onOpenAdmin, onNavigate }: MainMenuSheetProps) {
+export function MainMenuSheet({ open, account, isConnected, isOwner, config, onClose, onConnect, onDisconnect, onStart, onOpenWallet, onOpenAdmin }: MainMenuSheetProps) {
   const [termsOpen, setTermsOpen] = useState(false)
 
   if (!isConnected || !account) {
@@ -48,16 +46,9 @@ export function MainMenuSheet({ open, account, isConnected, isOwner, config, app
         </div>
 
         <div className="menuRowList">
-          <button className="menuRow" onClick={() => { onClose(); onNavigate('/me') }}>
-            <User size={17} />
-            <span className="menuRowLabel">My account</span>
-            <ChevronRight size={16} />
-          </button>
-
           <button className="menuRow" onClick={() => { onClose(); onOpenWallet() }}>
             <Wallet size={17} />
             <span className="menuRowLabel">Deposit / withdraw</span>
-            <span className="menuRowValue">$ {formatUsdc(appBalance, { compact: true })}</span>
             <ChevronRight size={16} />
           </button>
 
@@ -69,7 +60,7 @@ export function MainMenuSheet({ open, account, isConnected, isOwner, config, app
 
           {termsOpen ? (
             <div className="menuTermsPanel">
-              <div className="termsBox">
+              <div className="menuTermsList">
                 <div><span>Stake</span><strong>{formatUsdc(config?.stakeAmt)} USDC</strong></div>
                 <div><span>Duration</span><strong>{secondsToLabel(config?.challengeDuration)}</strong></div>
                 <div><span>Steal opens</span><strong>after {secondsToLabel(config?.stealGracePeriod)}</strong></div>
