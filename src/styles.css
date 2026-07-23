@@ -1360,7 +1360,12 @@ body {
 /* v42 action-menu redesign of the main menu sheet */
 .menuHero {
   display: grid;
+  justify-items: center;
   gap: 8px;
+}
+
+.menuHero .trustButton {
+  min-width: 220px;
 }
 
 .menuHeroCaption {

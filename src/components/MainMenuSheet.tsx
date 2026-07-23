@@ -41,7 +41,7 @@ export function MainMenuSheet({ open, account, isConnected, isOwner, config, onC
     <Sheet open={open} title="Menu" onClose={onClose}>
       <div className="menuStack">
         <div className="menuHero">
-          <button className="trustButton full" onClick={() => { onClose(); onStart() }}>Start friendship</button>
+          <button className="trustButton" onClick={() => { onClose(); onStart() }}>Start friendship</button>
           <p className="menuHeroCaption">Stake {formatUsdc(config?.stakeAmt)} USDC · {secondsToLabel(config?.challengeDuration)} challenge</p>
         </div>
 
