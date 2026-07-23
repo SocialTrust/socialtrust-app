@@ -1548,15 +1548,6 @@ body {
 }
 
 
-.walletFooter {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
 
 
 .walletHeaderBalances {

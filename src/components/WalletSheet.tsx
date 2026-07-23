@@ -34,7 +34,6 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
       : entered
         ? `Withdraw $ ${entered}`
         : 'Withdraw'
-  const balanceAfter = tab === 'deposit' ? appBalance + amountUnits : appBalance - amountUnits
 
   const balancesHeader = (
     <div className="walletHeaderBalances">
@@ -95,11 +94,6 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
           {actionLabel}
         </button>
 
-        {validAmount ? (
-          <div className="walletFooter">
-            <span>App balance after: $ {formatUsdc(balanceAfter)}</span>
-          </div>
-        ) : null}
       </div>
     </Sheet>
   )
