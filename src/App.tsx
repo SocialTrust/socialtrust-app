@@ -226,7 +226,6 @@ function App() {
         open={walletOpen}
         snapshot={snapshot}
         onClose={() => setWalletOpen(false)}
-        onApprove={actions.approveUsdc}
         onDeposit={actions.deposit}
         onWithdraw={actions.withdraw}
         onFundBonusPool={actions.fundBonusPool}
