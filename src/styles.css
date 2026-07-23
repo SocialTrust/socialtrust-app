@@ -1133,18 +1133,6 @@ body {
   flex: 1 1 auto;
 }
 
-.scanButton {
-  width: 46px;
-  height: 46px;
-  flex: 0 0 auto;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  display: grid;
-  place-items: center;
-  padding: 0;
-}
-
 .topBarMetrics {
   min-width: 0;
   display: flex;
@@ -1181,7 +1169,7 @@ body {
 
 .topBarMetrics .metricSymbolRep {
   color: var(--rep);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   line-height: 1;
 }
 
