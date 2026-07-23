@@ -71,6 +71,7 @@ type HomePageProps = {
   snapshot?: UserSnapshot
   isLoading: boolean
   onConnect: () => void
+  onStart: () => void
   onStartWith: (address: Address) => void
   onFindMatch: () => void
   onCancelMatch: () => void
@@ -86,7 +87,7 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onCancelMatch, onCleanupExpiredMatch, onOpenWallet, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStart, onStartWith, onFindMatch, onCancelMatch, onCleanupExpiredMatch, onOpenWallet, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
   const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
 
@@ -124,19 +125,11 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
 
   return (
     <div className="homeLayout">
-      {!snapshot?.activeMatch && !snapshot?.currentQueueEntry ? (
-        <section className="homeIntroCta" aria-label="Find a match">
-          <h1>Ready to start building trust?</h1>
-          <p>Get matched with a compatible account for a {formatUsdc(config?.matchFee)} USDC fee. Become friends before the match deadline and the fee is returned.</p>
-          <button
-            className="trustButton"
-            disabled={txPending}
-            onClick={(snapshot?.appBalance ?? 0n) >= (config?.matchFee ?? 0n) ? onFindMatch : onOpenWallet}
-          >
-            Find a match
-          </button>
-        </section>
-      ) : null}
+      <section className="homeIntroCta" aria-label="Start a friendship">
+        <h1>Ready to build trust?</h1>
+        <p>Stake {formatUsdc(config?.stakeAmt)} USDC with another account. If nobody steals before {secondsToLabel(config?.challengeDuration)}, the friendship is recorded.</p>
+        <button className="trustButton" onClick={onStart}>Start friendship</button>
+      </section>
 
       <MatchmakingCard
         account={account}
@@ -144,10 +137,12 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
         snapshot={snapshot}
         nowSeconds={nowSeconds}
         txPending={txPending}
+        onFindMatch={onFindMatch}
         onCancelMatch={onCancelMatch}
         onCleanupExpiredMatch={onCleanupExpiredMatch}
         onStartWith={onStartWith}
         onOpenChallenge={onOpenChallenge}
+        onOpenWallet={onOpenWallet}
         onNavigateAccount={(address) => onNavigate(`/account/${address}`)}
       />
 

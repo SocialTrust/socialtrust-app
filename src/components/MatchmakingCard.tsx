@@ -9,10 +9,12 @@ type MatchmakingCardProps = {
   snapshot?: UserSnapshot
   nowSeconds: number
   txPending?: boolean
+  onFindMatch: () => void
   onCancelMatch: () => void
   onCleanupExpiredMatch: () => void
   onStartWith: (address: Address) => void
   onOpenChallenge: (challenge: ChallengeView) => void
+  onOpenWallet: () => void
   onNavigateAccount: (address: Address) => void
 }
 
@@ -22,15 +24,20 @@ export function MatchmakingCard({
   snapshot,
   nowSeconds,
   txPending,
+  onFindMatch,
   onCancelMatch,
   onCleanupExpiredMatch,
   onStartWith,
   onOpenChallenge,
+  onOpenWallet,
   onNavigateAccount,
 }: MatchmakingCardProps) {
   const activeMatch = snapshot?.activeMatch
   const queueEntry = snapshot?.currentQueueEntry
+  const appBalance = snapshot?.appBalance ?? 0n
+  const matchFee = config?.matchFee ?? 0n
   const cancelFee = queueEntry?.cancelFeeAmount ?? config?.matchQueueCancelFee ?? 0n
+  const hasEnoughBalance = appBalance >= matchFee
 
   if (activeMatch && account) {
     const partner = sameAddress(activeMatch.user0, account) ? activeMatch.user1 : activeMatch.user0
@@ -94,5 +101,26 @@ export function MatchmakingCard({
     )
   }
 
-  return null
+  return (
+    <section className="matchmakingCard">
+      <div className="matchmakingTopline">
+        <span className="eyebrow">Matchmaking</span>
+        <span className="matchmakingStatus">Available</span>
+      </div>
+      <h3>Meet someone new</h3>
+      <p>Join the queue to be paired with a compatible account. Become friends before the match deadline and your match fee is returned.</p>
+      <div className="matchmakingFacts">
+        <div><span>Match fee</span><strong>{formatUsdc(matchFee)} USDC</strong></div>
+        <div><span>Match window</span><strong>{config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'}</strong></div>
+      </div>
+      {hasEnoughBalance ? (
+        <button className="primaryButton" disabled={txPending || matchFee === 0n} onClick={onFindMatch}>Find a match</button>
+      ) : (
+        <div className="matchmakingBalancePrompt">
+          <small>You need {formatUsdc(matchFee - appBalance)} more USDC in your app balance.</small>
+          <button className="secondaryButton" onClick={onOpenWallet}>Open wallet</button>
+        </div>
+      )}
+    </section>
+  )
 }
