@@ -1602,3 +1602,26 @@ body {
   font-size: 11px;
   text-decoration: underline;
 }
+
+.walletHeaderBalances {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  column-gap: 20px;
+  row-gap: 4px;
+  align-items: baseline;
+  padding-top: 4px;
+}
+
+.walletHeaderBalances span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.walletHeaderBalances strong {
+  color: var(--ink);
+  font-size: 1.08rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}

@@ -37,8 +37,15 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw, on
         : 'Withdraw'
   const balanceAfter = tab === 'deposit' ? appBalance + amountUnits : appBalance - amountUnits
 
+  const balancesHeader = (
+    <div className="walletHeaderBalances">
+      <span>Wallet</span><strong>$ {formatUsdc(snapshot?.walletUsdc)}</strong>
+      <span>App</span><strong>$ {formatUsdc(snapshot?.appBalance)}</strong>
+    </div>
+  )
+
   return (
-    <Sheet open={open} title="Wallet" onClose={onClose}>
+    <Sheet open={open} title="Wallet" header={balancesHeader} onClose={onClose}>
       <div className="formStack">
         <div className="segmentedControl">
           <button
@@ -61,7 +68,7 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw, on
           <div className="amountContext">
             <label htmlFor="walletAmount">Amount</label>
             <span className="amountContextBalance">
-              {tab === 'deposit' ? 'In wallet:' : 'In app:'} <strong>$ {formatUsdc(balance, { compact: true })}</strong>
+              Available: <strong>$ {formatUsdc(balance, { compact: true })}</strong>
             </span>
           </div>
           <div className="amountField">
