@@ -119,7 +119,7 @@ function App() {
                   <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
                 </button>
                 <button className="scanButton" aria-label="Scan">
-                  <ScanLine size={18} />
+                  <ScanLine size={20} />
                 </button>
                 <div className="topBarMetrics" aria-label="Account balance and reputation">
                   <span className="metricLine">
