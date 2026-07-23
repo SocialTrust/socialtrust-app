@@ -254,9 +254,11 @@ function App() {
         isConnected={isConnected}
         isOwner={isOwner}
         config={config}
+        appBalance={snapshot?.appBalance}
         onClose={() => setMenuOpen(false)}
         onConnect={connect}
         onDisconnect={disconnect}
+        onStart={() => startWith()}
         onOpenWallet={() => setWalletOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
         onNavigate={navigate}

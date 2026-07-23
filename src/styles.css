@@ -170,13 +170,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 label { display: grid; gap: 7px; color: var(--muted); font-weight: 750; }
 input { width: 100%; border: 1px solid var(--line); border-radius: 16px; padding: 13px 14px; color: var(--ink); background: #fff; outline: none; }
 input:focus { border-color: var(--line-strong); }
-.buttonGrid, .menuButtonGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.buttonGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .menuSection, .adminSection, .timelineCard, .explainCard, .detailHero, .depositPrompt, .balanceHint, .aboutBox { border: 1px solid var(--line); border-radius: 22px; padding: 16px; background: #fff; }
-.connectedRow { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
-.connectedRow span { display: block; color: var(--muted); font-size: 0.86rem; }
 .miniAvatar { width: 38px; height: 38px; border-radius: 50%; font-size: 0.78rem; }
-.protocolTerms, .aboutBox { background: var(--soft); }
-.smallTerms { margin-top: 10px; }
+.aboutBox { background: var(--soft); }
 .walletGrid { grid-template-columns: repeat(3, 1fr); margin-bottom: 14px; }
 .balanceHint { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
 .balanceHint strong { color: var(--ink); }
@@ -213,7 +210,7 @@ input:focus { border-color: var(--line-strong); }
   .landingStack, .heroCta { grid-template-columns: 1fr; }
   .landingHero { min-height: auto; }
   .heroCta { align-items: stretch; }
-  .ctaFacts, .challengeFactGrid, .walletGrid, .statGrid.three, .statGrid.four, .twoColForm, .buttonGrid, .menuButtonGrid { grid-template-columns: 1fr; }
+  .ctaFacts, .challengeFactGrid, .walletGrid, .statGrid.three, .statGrid.four, .twoColForm, .buttonGrid { grid-template-columns: 1fr; }
   .challengeCard { grid-template-columns: 1fr; }
   .challengeActions { justify-content: stretch; }
   .challengeActions button { flex: 1; }
@@ -1361,4 +1358,110 @@ body {
   .matchmakingBalancePrompt .secondaryButton,
   .matchmakingCard > .primaryButton,
   .matchmakingCard > .secondaryButton { width: 100%; }
+}
+
+/* v42 action-menu redesign of the main menu sheet */
+.menuHero {
+  display: grid;
+  gap: 8px;
+}
+
+.menuHeroCaption {
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.menuRowList {
+  display: grid;
+}
+
+.menuRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 13px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.menuRow svg {
+  flex: 0 0 auto;
+}
+
+.menuRowLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.menuRowValue {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.menuOwnerBadge {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.menuTermsPanel {
+  display: grid;
+  gap: 10px;
+  padding: 2px 2px 14px;
+}
+
+.menuTermsPanel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.menuRowList > * + * {
+  border-top: 1px solid rgba(232, 226, 216, 0.7);
+}
+
+.menuFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(232, 226, 216, 0.7);
+}
+
+.menuFooterAddress {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.menuDisconnect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
 }
