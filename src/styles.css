@@ -1530,37 +1530,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.amountField {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 8px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #fff;
-}
-
-.amountField:focus-within {
-  border-color: var(--line-strong);
-}
-
-.amountField input,
-.amountField input:focus {
-  border: 0;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.maxButton {
-  flex: 0 0 auto;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--soft);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 700;
-}
 
 .quickChips {
   display: flex;
@@ -1578,11 +1547,6 @@ body {
   font-weight: 600;
 }
 
-.walletHint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
 
 .walletFooter {
   display: flex;
@@ -1594,14 +1558,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.fundPoolLink {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  text-decoration: underline;
-}
 
 .walletHeaderBalances {
   display: grid;
@@ -1614,8 +1570,8 @@ body {
 
 .walletHeaderBalances span {
   color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 650;
 }
 
 .walletHeaderBalances strong {

@@ -228,7 +228,6 @@ function App() {
         onClose={() => setWalletOpen(false)}
         onDeposit={actions.deposit}
         onWithdraw={actions.withdraw}
-        onFundBonusPool={actions.fundBonusPool}
       />
 
       <ChallengeDetailSheet
