@@ -1,0 +1,28 @@
+{
+  "name": "socialtrust-v48-frontend",
+  "private": true,
+  "version": "0.48.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "sync:abi": "bash scripts/sync-socialtrust-abi.sh"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "viem": "2.55.2",
+    "vite": "latest",
+    "@rainbow-me/rainbowkit": "2.2.11",
+    "wagmi": "^2.16.0",
+    "@tanstack/react-query": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  }
+}
