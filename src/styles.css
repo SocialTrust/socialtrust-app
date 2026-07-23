@@ -1140,9 +1140,8 @@ body {
   align-items: flex-start;
   gap: 3px;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: -0.02em;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1164,12 +1163,11 @@ body {
 
 .topBarMetrics .metricSymbolUsdc {
   color: var(--usdc);
-  font-size: 1.05em;
+  font-size: 1.08em;
 }
 
 .topBarMetrics .metricSymbolRep {
   color: var(--rep);
-  font-size: 0.9em;
   line-height: 1;
 }
 
@@ -1308,7 +1306,7 @@ body {
 
 @media (max-width: 520px) {
   .topBarMetrics {
-    font-size: 0.78rem;
+    font-size: 12px;
   }
 
   .topBarMetrics .metricLine:first-child .metricValue {
