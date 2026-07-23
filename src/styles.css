@@ -1313,7 +1313,7 @@ body {
   }
 
   .topBarMetrics .metricSymbolRep {
-    font-size: 1rem;
+    font-size: 1.12rem;
   }
 
   .topBarMetrics .metricLine:first-child .metricValue {
