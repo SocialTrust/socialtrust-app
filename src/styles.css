@@ -1133,26 +1133,41 @@ body {
 
 .topBarMetrics {
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  gap: 3px;
   color: var(--ink);
-  font-size: 0.92rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 
-.topBarMetrics span {
-  display: inline-flex;
+.topBarMetricRow {
+  display: flex;
   align-items: center;
+  gap: 6px;
 }
 
-.topBarMetrics span + span::before {
-  content: "·";
-  color: var(--muted);
-  margin-right: 8px;
-  font-weight: 900;
+.topBarMetricIcon {
+  width: 14px;
+  flex: 0 0 14px;
+  text-align: center;
+  line-height: 1;
+}
+
+.topBarMetricIconDollar {
+  color: #2775ca;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.topBarMetricIconStar {
+  color: #7f77dd;
+}
+
+.topBarMetricValue {
+  color: #161412;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 .profilePopover {
@@ -1284,14 +1299,7 @@ body {
 
 @media (max-width: 520px) {
   .topBarMetrics {
-    gap: 6px;
-    font-size: 0.86rem;
-  }
-
-  .topBarMetrics span:first-child {
-    max-width: 108px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    gap: 3px;
   }
 
   .profilePopover {

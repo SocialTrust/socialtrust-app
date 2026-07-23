@@ -12,7 +12,7 @@ import { ChallengeDetailSheet } from './components/ChallengeDetailSheet'
 import { AdminSheet } from './components/AdminSheet'
 import { Toast } from './components/Toast'
 import { MainMenuSheet } from './components/MainMenuSheet'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, Star } from 'lucide-react'
 import { ProfileAvatar } from './components/ProfileAvatar'
 import { ProfilePopover } from './components/ProfilePopover'
 import { ProfileEditSheet } from './components/ProfileEditSheet'
@@ -119,8 +119,14 @@ function App() {
                   <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
                 </button>
                 <div className="topBarMetrics" aria-label="Account balance and reputation">
-                  <span>{topBarBalance} USDC</span>
-                  <span>Rep {topBarRep}</span>
+                  <div className="topBarMetricRow">
+                    <span className="topBarMetricIcon topBarMetricIconDollar" aria-hidden="true">$</span>
+                    <span className="topBarMetricValue">{topBarBalance}</span>
+                  </div>
+                  <div className="topBarMetricRow">
+                    <Star className="topBarMetricIcon topBarMetricIconStar" size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+                    <span className="topBarMetricValue">{topBarRep}</span>
+                  </div>
                 </div>
                 {profileOpen ? (
                   <ProfilePopover
