@@ -12,7 +12,7 @@ import { ChallengeDetailSheet } from './components/ChallengeDetailSheet'
 import { AdminSheet } from './components/AdminSheet'
 import { Toast } from './components/Toast'
 import { MainMenuSheet } from './components/MainMenuSheet'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, ScanLine } from 'lucide-react'
 import { ProfileAvatar } from './components/ProfileAvatar'
 import { ProfilePopover } from './components/ProfilePopover'
 import { ProfileEditSheet } from './components/ProfileEditSheet'
@@ -117,6 +117,9 @@ function App() {
                   onClick={() => setProfileOpen((open) => !open)}
                 >
                   <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
+                </button>
+                <button className="scanButton" aria-label="Scan">
+                  <ScanLine size={18} />
                 </button>
                 <div className="topBarMetrics" aria-label="Account balance and reputation">
                   <span className="metricLine">
