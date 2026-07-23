@@ -1150,7 +1150,7 @@ body {
   min-width: 0;
   max-width: 100%;
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
 }
 
@@ -1159,6 +1159,7 @@ body {
   width: 16px;
   display: inline-flex;
   justify-content: center;
+  line-height: 1;
 }
 
 .topBarMetrics .metricSymbolUsdc {
@@ -1170,7 +1171,6 @@ body {
 .topBarMetrics .metricSymbolRep {
   color: var(--rep);
   font-size: 0.95rem;
-  line-height: 1;
 }
 
 .topBarMetrics .metricValue {
