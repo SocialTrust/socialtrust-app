@@ -84,7 +84,7 @@ function App() {
 
   const openChallenge = (challenge: ChallengeView) => setSelectedChallengeKey(challenge.pairKey)
 
-  const topBarBalance = formatUsdc(snapshot?.appBalance, { compact: true })
+  const topBarBalance = formatUsdc(snapshot?.appBalance, { truncate: true })
   const topBarRep = String(snapshot?.repScore ?? 0n)
 
   const finalize = (challenge: ChallengeView) => actions.finalizeFriendship(challenge.other)

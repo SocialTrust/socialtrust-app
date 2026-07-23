@@ -1312,6 +1312,10 @@ body {
     font-size: 13px;
   }
 
+  .topBarMetrics .metricSymbolRep {
+    font-size: 1rem;
+  }
+
   .topBarMetrics .metricLine:first-child .metricValue {
     max-width: 108px;
     overflow: hidden;
