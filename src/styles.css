@@ -1141,7 +1141,7 @@ body {
   gap: 3px;
   color: var(--ink);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1155,27 +1155,28 @@ body {
 }
 
 .topBarMetrics .metricSymbol {
-  flex: 0 0 14px;
-  width: 14px;
+  flex: 0 0 16px;
+  width: 16px;
   display: inline-flex;
   justify-content: center;
 }
 
 .topBarMetrics .metricSymbolUsdc {
   color: var(--usdc);
-  font-size: 1.08em;
+  font-size: 1rem;
   font-weight: 700;
 }
 
 .topBarMetrics .metricSymbolRep {
   color: var(--rep);
-  font-size: 1.05em;
+  font-size: 0.88rem;
   line-height: 1;
 }
 
 .topBarMetrics .metricValue {
   min-width: 0;
-  font-weight: 600;
+  font-size: 0.92rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
