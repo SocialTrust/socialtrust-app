@@ -171,11 +171,9 @@ label { display: grid; gap: 7px; color: var(--muted); font-weight: 750; }
 input { width: 100%; border: 1px solid var(--line); border-radius: 16px; padding: 13px 14px; color: var(--ink); background: #fff; outline: none; }
 input:focus { border-color: var(--line-strong); }
 .buttonGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-.menuSection, .adminSection, .timelineCard, .explainCard, .detailHero, .depositPrompt, .balanceHint, .aboutBox { border: 1px solid var(--line); border-radius: 22px; padding: 16px; background: #fff; }
+.menuSection, .adminSection, .timelineCard, .explainCard, .detailHero, .aboutBox { border: 1px solid var(--line); border-radius: 22px; padding: 16px; background: #fff; }
 .miniAvatar { width: 38px; height: 38px; border-radius: 50%; font-size: 0.78rem; }
 .aboutBox { background: var(--soft); }
-.balanceHint { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
-.balanceHint strong { color: var(--ink); }
 .twoColForm { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
 .adminSection h3 { margin: 0 0 8px; }
 .adminHelp { margin: 0 0 12px; color: var(--muted); line-height: 1.45; font-size: 0.9rem; }
@@ -1571,4 +1569,113 @@ body {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* v44 QR scan/show friendship sheet */
+.scanArea {
+  width: 100%;
+  min-height: 210px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  padding: 18px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 20px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scanArea:hover {
+  transform: none;
+}
+
+.scanAreaActive {
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  background: #000;
+  overflow: hidden;
+}
+
+.scanVideo {
+  display: block;
+  width: 100%;
+  height: 210px;
+  object-fit: cover;
+  border-radius: 19px;
+}
+
+.scanAreaDone {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-style: solid;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.scanAreaDone svg {
+  color: var(--trust);
+}
+
+.scanHint {
+  margin: -6px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pasteLabel {
+  font-size: 11px;
+}
+
+.qrPanel {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 6px 0 2px;
+}
+
+.qrCard {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  line-height: 0;
+}
+
+.qrAddressRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.qrCaption {
+  max-width: 260px;
+}
+
+.sheetCaption {
+  margin: -4px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sheetCaption .captionBalance {
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.trustButton:disabled {
+  opacity: 0.55;
+  box-shadow: none;
 }

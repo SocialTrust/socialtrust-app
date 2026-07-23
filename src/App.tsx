@@ -213,6 +213,7 @@ function App() {
       <StartFriendshipSheet
         open={startOpen}
         initialOther={startOther}
+        account={account}
         config={config}
         snapshot={snapshot}
         isConnected={isConnected}
