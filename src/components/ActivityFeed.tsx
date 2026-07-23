@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { ActivityItem } from '../types'
 import { formatUsdc, relativeTime, shortAddress } from '../lib/format'
 
@@ -87,6 +89,8 @@ function activityTone(item: ActivityItem) {
 }
 
 export function ActivityFeed({ items, onNavigateAccount, nowSeconds }: ActivityFeedProps) {
+  const [expanded, setExpanded] = useState(false)
+
   if (items.length === 0) {
     return (
       <div className="quietEmpty activityEmpty">
@@ -96,23 +100,32 @@ export function ActivityFeed({ items, onNavigateAccount, nowSeconds }: ActivityF
     )
   }
 
+  const visible = expanded ? items : items.slice(0, 3)
+
   return (
-    <div className="activityList">
-      {items.slice(0, 8).map((item) => (
-        <article key={item.id} className={`activityItem ${item.kind} ${activityTone(item)}`}>
-          <div className="activityTopLine">
-            <strong>{displayTitle(item)}</strong>
-            <small>{item.timestamp ? relativeTime(item.timestamp, nowSeconds) : item.blockNumber ? `Block ${item.blockNumber.toString()}` : 'recently'}</small>
-          </div>
-          <div className="activitySubLine">
-            {item.other ? (
-              <button onClick={() => onNavigateAccount(item.other!)}>{renderSubtitleText(subtitle(item))}</button>
-            ) : (
-              <span>{renderSubtitleText(subtitle(item))}</span>
-            )}
-          </div>
-        </article>
-      ))}
-    </div>
+    <>
+      <div className="activityList">
+        {visible.map((item) => (
+          <article key={item.id} className={`activityItem ${item.kind} ${activityTone(item)}`}>
+            <div className="activityTopLine">
+              <strong>{displayTitle(item)}</strong>
+              <small>{item.timestamp ? relativeTime(item.timestamp, nowSeconds) : item.blockNumber ? `Block ${item.blockNumber.toString()}` : 'recently'}</small>
+            </div>
+            <div className="activitySubLine">
+              {item.other ? (
+                <button onClick={() => onNavigateAccount(item.other!)}>{renderSubtitleText(subtitle(item))}</button>
+              ) : (
+                <span>{renderSubtitleText(subtitle(item))}</span>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+      {items.length > 3 ? (
+        <button className="feedToggle" onClick={() => setExpanded((open) => !open)}>
+          {expanded ? <>Show less <ChevronUp size={15} /></> : <>Show {items.length - 3} more <ChevronDown size={15} /></>}
+        </button>
+      ) : null}
+    </>
   )
 }
