@@ -1315,24 +1315,32 @@ export function useSocialTrust() {
     // before the action resolves. This keeps the top bar, wallet sheet, and
     // matchmaking hero in sync with the confirmed receipt instead of waiting
     // for the detached subgraph poll (which lags block confirmation).
+    //
+    // These two refreshes run sequentially, not in parallel: each does a
+    // non-atomic read-modify-write on snapshotRef.current (spread the current
+    // snapshot, overwrite its own fields, write it back). Run concurrently they
+    // race — whichever resolves last spreads a stale base and clobbers the
+    // other's fields. In practice the match refresh short-circuits fast when
+    // cancelling (not in queue, no match), lost the race to the slower balance
+    // refresh, and left the hero stuck on "Searching" until a manual refresh.
     if (balanceChanging || matchChanging) {
       try {
         // Read at the confirmed receipt block so the UI cannot observe a
         // pre-transaction "latest" value from a lagging RPC edge.
-        await Promise.all([
-          balanceChanging ? refreshCoreStateOnly(writer, receipt.blockNumber) : Promise.resolve(),
-          matchChanging ? refreshMatchStateOnly(writer, receipt.blockNumber) : Promise.resolve(),
-        ])
+        if (balanceChanging) await refreshCoreStateOnly(writer, receipt.blockNumber)
+        if (matchChanging) await refreshMatchStateOnly(writer, receipt.blockNumber)
       } catch (error) {
         console.warn('Confirmed state refresh at receipt block failed; retrying latest state.', error)
-        await Promise.all([
-          balanceChanging ? refreshCoreStateOnly(writer).catch((retryError) => {
+        if (balanceChanging) {
+          await refreshCoreStateOnly(writer).catch((retryError) => {
             console.warn('Confirmed balance refresh retry failed.', retryError)
-          }) : Promise.resolve(),
-          matchChanging ? refreshMatchStateOnly(writer).catch((retryError) => {
+          })
+        }
+        if (matchChanging) {
+          await refreshMatchStateOnly(writer).catch((retryError) => {
             console.warn('Confirmed match-state refresh retry failed.', retryError)
-          }) : Promise.resolve(),
-        ])
+          })
+        }
       }
     }
 
