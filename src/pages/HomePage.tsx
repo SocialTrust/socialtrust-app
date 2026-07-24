@@ -3,11 +3,113 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { Address } from 'viem'
 import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import { challengeSortScore, getChallengeState } from '../lib/challenges'
-import { formatUsdc, secondsToLabel } from '../lib/format'
+import { countdownUntil, formatUsdc, relativeTime, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
 import { ChallengeCard } from '../components/ChallengeCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { ProfileAvatar, displayNameFor } from '../components/ProfileAvatar'
-import { MatchmakingCard } from '../components/MatchmakingCard'
+
+
+type MatchmakingHeroProps = {
+  account?: Address
+  config?: ContractConfig
+  snapshot?: UserSnapshot
+  nowSeconds: number
+  txPending?: boolean
+  onFindMatch: () => void
+  onDepositAndMatchMe: (amount: string) => void
+  onCancelMatch: () => void
+  onStartWith: (address: Address) => void
+  onOpenChallenge: (challenge: ChallengeView) => void
+  onNavigateAccount: (address: Address) => void
+}
+
+function MatchmakingHero({
+  account,
+  config,
+  snapshot,
+  nowSeconds,
+  txPending,
+  onFindMatch,
+  onDepositAndMatchMe,
+  onCancelMatch,
+  onStartWith,
+  onOpenChallenge,
+  onNavigateAccount,
+}: MatchmakingHeroProps) {
+  const activeMatch = snapshot?.activeMatch
+  const queueEntry = snapshot?.currentQueueEntry
+
+  // Matched: an active, non-expired match. Expired matches are cleared
+  // internally by matchMe / depositAndMatchMe, so we fall through to the
+  // Available state and let "Find a match" clear them.
+  if (activeMatch && account && !(activeMatch.deadline > 0n && BigInt(nowSeconds) > activeMatch.deadline)) {
+    const partner = sameAddress(activeMatch.user0, account) ? activeMatch.user1 : activeMatch.user0
+    const relationshipChallenge = snapshot?.challenges.find((challenge) => sameAddress(challenge.other, partner))
+
+    return (
+      <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
+        <span className="matchStatusLine matchStatusTrust">
+          <span className="matchStatusDot" />
+          <span className="matchStatusLabel">Matched</span>
+        </span>
+        <h1>You matched with {displayNameFor(partner, snapshot?.matchPartnerProfile)}</h1>
+        <button className="matchPartnerLink" onClick={() => onNavigateAccount(partner)}>
+          <ProfileAvatar address={partner} profile={snapshot?.matchPartnerProfile} size="sm" />
+          <span className="matchPartnerAddress">{shortAddress(partner)}</span>
+        </button>
+        <p>Become friends before the deadline to get your match fee back.</p>
+        {relationshipChallenge ? (
+          <button className="trustButton" disabled={txPending} onClick={() => onOpenChallenge(relationshipChallenge)}>Open challenge</button>
+        ) : (
+          <button className="trustButton" disabled={txPending} onClick={() => onStartWith(partner)}>Start friendship</button>
+        )}
+        <span className="heroCaption">{countdownUntil(activeMatch.deadline, nowSeconds)} left</span>
+      </section>
+    )
+  }
+
+  if (queueEntry) {
+    const cancelFee = queueEntry.cancelFeeAmount ?? config?.matchQueueCancelFee ?? 0n
+    const refund = queueEntry.feeAmount > cancelFee ? queueEntry.feeAmount - cancelFee : 0n
+    return (
+      <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
+        <span className="matchStatusLine matchStatusWarning">
+          <span className="matchStatusDot" />
+          <span className="matchStatusLabel">Searching</span>
+        </span>
+        <h1>Looking for your match…</h1>
+        <p>Queued {relativeTime(queueEntry.queuedAt, nowSeconds)}. Your {formatUsdc(queueEntry.feeAmount)} USDC fee is locked while you wait.</p>
+        <button className="secondaryButton" disabled={txPending} onClick={onCancelMatch}>Cancel search</button>
+        <span className="heroCaption">Cancelling refunds {formatUsdc(refund)} USDC</span>
+      </section>
+    )
+  }
+
+  const appBalance = snapshot?.appBalance ?? 0n
+  const matchFee = config?.matchFee ?? 0n
+  const hasEnoughBalance = appBalance >= matchFee
+  const shortfall = matchFee > appBalance ? matchFee - appBalance : 0n
+  const days = config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'
+
+  return (
+    <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
+      <h1>Ready to build trust?</h1>
+      <p>Get matched with a compatible account. Become friends before the deadline and your match fee comes back.</p>
+      <button
+        className="trustButton"
+        disabled={txPending || matchFee === 0n}
+        onClick={() => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))}
+      >
+        Find a match
+      </button>
+      <span className="heroCaption">
+        {hasEnoughBalance
+          ? `${formatUsdc(matchFee)} USDC fee · ${days}`
+          : `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`}
+      </span>
+    </section>
+  )
+}
 
 
 function FriendsSection({
@@ -71,7 +173,6 @@ type HomePageProps = {
   snapshot?: UserSnapshot
   isLoading: boolean
   onConnect: () => void
-  onStart: () => void
   onStartWith: (address: Address) => void
   onFindMatch: () => void
   onDepositAndMatchMe: (amount: string) => void
@@ -86,7 +187,7 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStart, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
   const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
 
@@ -124,13 +225,7 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
 
   return (
     <div className="homeLayout">
-      <section className="homeIntroCta" aria-label="Start a friendship">
-        <h1>Ready to build trust?</h1>
-        <p>Stake {formatUsdc(config?.stakeAmt)} USDC with another account. If nobody steals before {secondsToLabel(config?.challengeDuration)}, the friendship is recorded.</p>
-        <button className="trustButton" onClick={onStart}>Start friendship</button>
-      </section>
-
-      <MatchmakingCard
+      <MatchmakingHero
         account={account}
         config={config}
         snapshot={snapshot}
