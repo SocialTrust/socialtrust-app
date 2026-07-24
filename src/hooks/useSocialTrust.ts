@@ -791,13 +791,91 @@ export function useSocialTrust() {
     return nextConfig
   }, [readContract])
 
+  // Queue and match state are read authoritatively from the chain rather than
+  // from The Graph. The subgraph lags block confirmation by seconds, which left
+  // the matchmaking hero stuck on "Available" after a confirmed matchMe until an
+  // indexer caught up. RPC reflects the receipt immediately, so the hero flips
+  // the moment the transaction resolves. The subgraph is still used for the
+  // partner profile, activity feed, friends, and challenges.
+  const readMatchQueueEntryOnChain = useCallback(async (user: Address, blockNumber?: bigint): Promise<MatchQueueState | undefined> => {
+    const inQueue = await readContract<boolean>('isInMatchQueue', [user], blockNumber)
+    if (!inQueue) return undefined
+    const entry = await readContract<Record<string, unknown> & Record<number, unknown>>('matchQueueEntries', [user], blockNumber)
+    const queuedUser = (entry.user ?? entry[0]) as Address | undefined
+    if (!queuedUser || sameAddress(queuedUser, ZERO_ADDRESS)) return undefined
+    return {
+      user: queuedUser,
+      feeAmount: toBigIntValue(entry.feeAmount ?? entry[1]),
+      cancelFeeAmount: toBigIntValue(entry.cancelFeeAmount ?? entry[2]),
+      queuedAt: toBigIntValue(entry.queuedAt ?? entry[3]),
+      status: 'QUEUED',
+    }
+  }, [readContract, toBigIntValue])
+
+  const readActiveMatchOnChain = useCallback(async (user: Address, blockNumber?: bigint): Promise<MatchState | undefined> => {
+    const matchId = await readContract<bigint>('activeMatchIdOf', [user], blockNumber)
+    if (!matchId || matchId === 0n) return undefined
+    const match = await readContract<Record<string, unknown> & Record<number, unknown>>('matches', [matchId], blockNumber)
+    const user0 = (match.user0 ?? match[0]) as Address | undefined
+    const user1 = (match.user1 ?? match[1]) as Address | undefined
+    if (!user0 || !user1 || sameAddress(user0, ZERO_ADDRESS)) return undefined
+    // A resolved match (finalized or cleaned up) is no longer active. Expired but
+    // not-yet-cleaned matches still return here; the hero renders them as
+    // Available via its own deadline check, matching the prior subgraph behavior.
+    if (Boolean(match.resolved ?? match[6] ?? false)) return undefined
+    return {
+      id: String(matchId),
+      matchId,
+      user0,
+      user1,
+      feeAmount0: toBigIntValue(match.feeAmount0 ?? match[2]),
+      feeAmount1: toBigIntValue(match.feeAmount1 ?? match[3]),
+      matchedAt: toBigIntValue(match.matchedAt ?? match[4]),
+      deadline: toBigIntValue(match.deadline ?? match[5]),
+      status: 'ACTIVE',
+    }
+  }, [readContract, toBigIntValue])
+
+  const readMatchStateOnChain = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const [currentQueueEntry, activeMatch] = await Promise.all([
+      readMatchQueueEntryOnChain(user, blockNumber),
+      readActiveMatchOnChain(user, blockNumber),
+    ])
+    return { currentQueueEntry, activeMatch }
+  }, [readActiveMatchOnChain, readMatchQueueEntryOnChain])
+
+  const refreshMatchStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const { currentQueueEntry, activeMatch } = await readMatchStateOnChain(user, blockNumber)
+    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+
+    const partner = activeMatch
+      ? (sameAddress(activeMatch.user0, user) ? activeMatch.user1 : activeMatch.user0)
+      : undefined
+    const matchPartnerProfile = partner ? await readSocialProfile(partner).catch(() => undefined) : undefined
+    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+
+    const current = snapshotRef.current
+    if (!current) return
+    const updated = {
+      ...current,
+      currentQueueEntry,
+      activeMatch,
+      matchPartnerProfile: partner ? matchPartnerProfile : undefined,
+    }
+    snapshotRef.current = updated
+    setSnapshot(updated)
+  }, [readMatchStateOnChain, readSocialProfile])
+
   const refreshGraphStateOnly = useCallback(async (user: Address) => {
     try {
-      const graphState = await readGraphState(user)
+      const [graphState, matchState] = await Promise.all([
+        readGraphState(user),
+        readMatchStateOnChain(user),
+      ])
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
 
-      const matchPartner = graphState.activeMatch
-        ? (sameAddress(graphState.activeMatch.user0, user) ? graphState.activeMatch.user1 : graphState.activeMatch.user0)
+      const matchPartner = matchState.activeMatch
+        ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
         : undefined
       const [friendProfiles, friendRepPairs, matchPartnerProfile] = await Promise.all([
         readSocialProfiles(graphState.friends),
@@ -814,9 +892,9 @@ export function useSocialTrust() {
           friends: graphState.friends,
           challenges: graphState.challenges,
           recentActivity: graphState.recentActivity,
-          currentQueueEntry: graphState.currentQueueEntry,
-          activeMatch: graphState.activeMatch,
-          matchPartnerProfile,
+          currentQueueEntry: matchState.currentQueueEntry,
+          activeMatch: matchState.activeMatch,
+          matchPartnerProfile: matchPartner ? matchPartnerProfile : undefined,
           friendProfiles,
           friendRepScores,
         }
@@ -829,7 +907,7 @@ export function useSocialTrust() {
       console.warn('The Graph state refresh failed.', error)
       return undefined
     }
-  }, [readContract, readGraphState, readSocialProfile, readSocialProfiles])
+  }, [readContract, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
   const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`) => {
     const pollId = graphPollSeqRef.current + 1
@@ -890,6 +968,7 @@ export function useSocialTrust() {
       owner,
       walletUsdc,
       allowance,
+      matchState,
       graphState,
     ] = await Promise.all([
       readContract<bigint>('balances', [user]),
@@ -899,6 +978,10 @@ export function useSocialTrust() {
       readContract<Address>('owner'),
       appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? Promise.resolve(0n) : readErc20<bigint>('balanceOf', [user]),
       appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? Promise.resolve(0n) : readErc20<bigint>('allowance', [user, appConfig.contractAddress]),
+      readMatchStateOnChain(user).catch((error) => {
+        console.warn('On-chain match state read failed; preserving the last known match state.', error)
+        return { currentQueueEntry: previousSnapshot?.currentQueueEntry, activeMatch: previousSnapshot?.activeMatch }
+      }),
       graphStatePromise,
     ])
 
@@ -913,8 +996,8 @@ export function useSocialTrust() {
       friends: graphState.friends,
       challenges: graphState.challenges,
       recentActivity: graphState.recentActivity,
-      currentQueueEntry: graphState.currentQueueEntry,
-      activeMatch: graphState.activeMatch,
+      currentQueueEntry: matchState.currentQueueEntry,
+      activeMatch: matchState.activeMatch,
       owner,
       socialProfile: previousSnapshot?.socialProfile,
       friendProfiles: previousSnapshot?.friendProfiles,
@@ -924,8 +1007,8 @@ export function useSocialTrust() {
     snapshotRef.current = nextSnapshot
     setSnapshot(nextSnapshot)
 
-    const matchPartner = graphState.activeMatch
-      ? (sameAddress(graphState.activeMatch.user0, user) ? graphState.activeMatch.user1 : graphState.activeMatch.user0)
+    const matchPartner = matchState.activeMatch
+      ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
       : undefined
 
     void Promise.all([
@@ -947,7 +1030,7 @@ export function useSocialTrust() {
     })
 
     return nextSnapshot
-  }, [readContract, readErc20, readGraphState, readSocialProfile, readSocialProfiles])
+  }, [readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
   const refresh = useCallback(async () => {
     setIsLoading(true)
@@ -1221,19 +1304,35 @@ export function useSocialTrust() {
       'cleanupMyExpiredMatch',
     ].includes(action)
 
-    // Balance-changing writes must update authoritative RPC state before the
-    // action resolves. This keeps the top bar and wallet sheet in sync with
-    // the confirmed receipt instead of waiting for a detached refresh task.
-    if (balanceChanging) {
+    const matchChanging = [
+      'matchMe',
+      'depositAndMatchMe',
+      'cancelMatchMe',
+      'cleanupMyExpiredMatch',
+    ].includes(action)
+
+    // Balance- and match-changing writes must update authoritative RPC state
+    // before the action resolves. This keeps the top bar, wallet sheet, and
+    // matchmaking hero in sync with the confirmed receipt instead of waiting
+    // for the detached subgraph poll (which lags block confirmation).
+    if (balanceChanging || matchChanging) {
       try {
         // Read at the confirmed receipt block so the UI cannot observe a
         // pre-transaction "latest" value from a lagging RPC edge.
-        await refreshCoreStateOnly(writer, receipt.blockNumber)
+        await Promise.all([
+          balanceChanging ? refreshCoreStateOnly(writer, receipt.blockNumber) : Promise.resolve(),
+          matchChanging ? refreshMatchStateOnly(writer, receipt.blockNumber) : Promise.resolve(),
+        ])
       } catch (error) {
-        console.warn('Confirmed balance refresh at receipt block failed; retrying latest state.', error)
-        await refreshCoreStateOnly(writer).catch((retryError) => {
-          console.warn('Confirmed balance refresh retry failed.', retryError)
-        })
+        console.warn('Confirmed state refresh at receipt block failed; retrying latest state.', error)
+        await Promise.all([
+          balanceChanging ? refreshCoreStateOnly(writer).catch((retryError) => {
+            console.warn('Confirmed balance refresh retry failed.', retryError)
+          }) : Promise.resolve(),
+          matchChanging ? refreshMatchStateOnly(writer).catch((retryError) => {
+            console.warn('Confirmed match-state refresh retry failed.', retryError)
+          }) : Promise.resolve(),
+        ])
       }
     }
 
@@ -1261,7 +1360,7 @@ export function useSocialTrust() {
       ])
       if (graphTracked) await pollGraphForTransaction(writer, hash)
     })()
-  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, retryCoreStateAfterWrite])
+  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryCoreStateAfterWrite])
 
   const write = useCallback(async (action: ActionName, args: readonly unknown[] = [], label = 'Confirm transaction'): Promise<boolean> => {
     if (appConfig.isMockMode) {
