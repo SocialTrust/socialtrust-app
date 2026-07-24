@@ -170,6 +170,7 @@ function App() {
           onFindMatch={actions.matchMe}
           onDepositAndMatchMe={actions.depositAndMatchMe}
           onCancelMatch={actions.cancelMatchMe}
+          onSetTelegramUsername={actions.setTelegramUsername}
           txPending={tx.pending}
           onOpenChallenge={openChallenge}
           onFinalize={finalize}

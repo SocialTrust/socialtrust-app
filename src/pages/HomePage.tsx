@@ -21,6 +21,19 @@ type MatchmakingHeroProps = {
   onStartWith: (address: Address) => void
   onOpenChallenge: (challenge: ChallengeView) => void
   onNavigateAccount: (address: Address) => void
+  onSetTelegramUsername: (handle: string) => Promise<boolean | void>
+}
+
+// Mirror of the profiles hook's handle normalization, enough to gate the
+// "Save handle" button and render the confirmation. The on-chain save still
+// runs the authoritative normalization/validation inside setTelegramUsername.
+function normalizeTelegramHandle(raw: string): string {
+  let value = (raw ?? '').trim()
+  value = value.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
+  value = value.replace(/^(?:t\.me|telegram\.me)\//i, '')
+  value = value.replace(/^@+/, '')
+  value = value.split(/[/?#]/)[0]
+  return value.trim().toLowerCase()
 }
 
 function MatchmakingHero({
@@ -35,7 +48,13 @@ function MatchmakingHero({
   onStartWith,
   onOpenChallenge,
   onNavigateAccount,
+  onSetTelegramUsername,
 }: MatchmakingHeroProps) {
+  const [gateOpen, setGateOpen] = useState(false)
+  const [handleInput, setHandleInput] = useState('')
+  const [savedHandle, setSavedHandle] = useState<string | null>(null)
+  const [savingHandle, setSavingHandle] = useState(false)
+
   const activeMatch = snapshot?.activeMatch
   const queueEntry = snapshot?.currentQueueEntry
 
@@ -91,22 +110,82 @@ function MatchmakingHero({
   const shortfall = matchFee > appBalance ? matchFee - appBalance : 0n
   const days = config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'
 
+  // Matching reaches people over Telegram, so entering the queue is gated on a
+  // handle being set. Once it is set on the profile — or freshly saved in this
+  // session — "Find a match" behaves normally. Otherwise the first tap opens an
+  // inline handle field (progressive disclosure, not an error) and the button
+  // becomes "Save handle" until the handle is stored on chain.
+  const hasTelegram = Boolean(snapshot?.socialProfile?.telegramUsername?.trim())
+  const readyToMatch = hasTelegram || savedHandle !== null
+  const normalizedHandle = normalizeTelegramHandle(handleInput)
+
+  const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))
+
+  const saveHandle = async () => {
+    if (!normalizedHandle || savingHandle) return
+    setSavingHandle(true)
+    try {
+      const ok = await onSetTelegramUsername(handleInput)
+      if (ok) {
+        setSavedHandle(normalizedHandle)
+        setHandleInput('')
+        setGateOpen(false)
+      }
+    } finally {
+      setSavingHandle(false)
+    }
+  }
+
+  const showGate = gateOpen && !readyToMatch
+
+  let subtext: string
+  if (showGate) subtext = 'Matches reach you on Telegram. Add your handle to join the queue.'
+  else subtext = 'Get matched with a compatible account. Become friends before the deadline and your match fee comes back.'
+
+  let caption: string | null
+  if (savedHandle && readyToMatch) caption = `Saved @${savedHandle} — you're ready to match`
+  else if (showGate) caption = null
+  else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${days}`
+  else caption = `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`
+
   return (
     <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
       <h1>Ready to build trust?</h1>
-      <p>Get matched with a compatible account. Become friends before the deadline and your match fee comes back.</p>
-      <button
-        className="trustButton"
-        disabled={txPending || matchFee === 0n}
-        onClick={() => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))}
-      >
-        Find a match
-      </button>
-      <span className="heroCaption">
-        {hasEnoughBalance
-          ? `${formatUsdc(matchFee)} USDC fee · ${days}`
-          : `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`}
-      </span>
+      <p>{subtext}</p>
+
+      {showGate ? (
+        <div className="matchHandleField">
+          <span className="matchHandlePrefix">@</span>
+          <input
+            className="matchHandleInput"
+            value={handleInput}
+            onChange={(event) => setHandleInput(event.target.value)}
+            placeholder="yourhandle"
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            maxLength={32}
+            aria-label="Telegram username"
+          />
+        </div>
+      ) : null}
+
+      {showGate ? (
+        <button className="trustButton" disabled={savingHandle || !normalizedHandle} onClick={saveHandle}>
+          Save handle
+        </button>
+      ) : (
+        <button
+          className="trustButton"
+          disabled={txPending || matchFee === 0n}
+          onClick={() => (readyToMatch ? startMatching() : setGateOpen(true))}
+        >
+          Find a match
+        </button>
+      )}
+
+      {caption ? <span className="heroCaption">{caption}</span> : null}
     </section>
   )
 }
@@ -177,6 +256,7 @@ type HomePageProps = {
   onFindMatch: () => void
   onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
+  onSetTelegramUsername: (handle: string) => Promise<boolean | void>
   txPending?: boolean
   onOpenChallenge: (challenge: ChallengeView) => void
   onFinalize: (challenge: ChallengeView) => void
@@ -187,7 +267,7 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, onSetTelegramUsername, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
   const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
 
@@ -237,6 +317,7 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
         onStartWith={onStartWith}
         onOpenChallenge={onOpenChallenge}
         onNavigateAccount={(address) => onNavigate(`/account/${address}`)}
+        onSetTelegramUsername={onSetTelegramUsername}
       />
 
       <section className="homeSection feedSection">
