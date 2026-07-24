@@ -48,7 +48,7 @@ export function ProfileEditSheet({ open, profile, onClose, onSave }: ProfileEdit
           <input
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
-            placeholder="Jamie"
+            placeholder=""
             maxLength={64}
           />
         </label>
@@ -58,7 +58,7 @@ export function ProfileEditSheet({ open, profile, onClose, onSave }: ProfileEdit
             <input
               value={xUsername}
               onChange={(event) => setXUsername(event.target.value)}
-              placeholder="jamie_judd"
+              placeholder=""
               maxLength={15}
               autoCapitalize="none"
             />
@@ -68,7 +68,7 @@ export function ProfileEditSheet({ open, profile, onClose, onSave }: ProfileEdit
             <input
               value={telegramUsername}
               onChange={(event) => setTelegramUsername(event.target.value)}
-              placeholder="jamiejudd"
+              placeholder=""
               maxLength={32}
               autoCapitalize="none"
             />
@@ -79,7 +79,7 @@ export function ProfileEditSheet({ open, profile, onClose, onSave }: ProfileEdit
           <input
             value={imgUrl}
             onChange={(event) => setImgUrl(event.target.value)}
-            placeholder="https://..."
+            placeholder=""
             maxLength={1024}
             autoCapitalize="none"
           />

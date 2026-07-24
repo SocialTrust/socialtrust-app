@@ -79,7 +79,7 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
           <div className="quickChips">
             {QUICK_AMOUNTS.map((quick) => (
               <button key={quick} className="quickChip" onClick={() => setAmount(quick)}>
-                ${Number(quick).toFixed(0)}
+                ${formatUsdc(parseUsdc(quick), { compact: true })}
               </button>
             ))}
             <button className="quickChip" onClick={() => setAmount(formatUsdc(balance, { truncate: true }))}>Max</button>

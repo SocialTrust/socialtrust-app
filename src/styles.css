@@ -1365,13 +1365,10 @@ body {
 .matchPartnerRow > span { min-width: 0; }
 .matchPartnerRow strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .matchPartnerRow small { display: block; margin-top: 3px; color: var(--muted); }
-.matchmakingBalancePrompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.matchmakingBalancePrompt small { color: var(--muted); line-height: 1.4; }
+.matchmakingDepositNote { display: block; margin-top: 8px; color: var(--muted); line-height: 1.4; }
 
 @media (max-width: 620px) {
   .matchmakingFacts { grid-template-columns: 1fr; }
-  .matchmakingBalancePrompt { align-items: stretch; flex-direction: column; }
-  .matchmakingBalancePrompt .secondaryButton,
   .matchmakingCard > .primaryButton,
   .matchmakingCard > .secondaryButton { width: 100%; }
 }
