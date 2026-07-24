@@ -74,9 +74,8 @@ type HomePageProps = {
   onStart: () => void
   onStartWith: (address: Address) => void
   onFindMatch: () => void
+  onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
-  onCleanupExpiredMatch: () => void
-  onOpenWallet: () => void
   txPending?: boolean
   onOpenChallenge: (challenge: ChallengeView) => void
   onFinalize: (challenge: ChallengeView) => void
@@ -87,7 +86,7 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStart, onStartWith, onFindMatch, onCancelMatch, onCleanupExpiredMatch, onOpenWallet, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStart, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
   const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
 
@@ -138,11 +137,10 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
         nowSeconds={nowSeconds}
         txPending={txPending}
         onFindMatch={onFindMatch}
+        onDepositAndMatchMe={onDepositAndMatchMe}
         onCancelMatch={onCancelMatch}
-        onCleanupExpiredMatch={onCleanupExpiredMatch}
         onStartWith={onStartWith}
         onOpenChallenge={onOpenChallenge}
-        onOpenWallet={onOpenWallet}
         onNavigateAccount={(address) => onNavigate(`/account/${address}`)}
       />
 

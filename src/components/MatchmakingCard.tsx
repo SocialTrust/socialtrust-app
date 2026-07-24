@@ -10,11 +10,10 @@ type MatchmakingCardProps = {
   nowSeconds: number
   txPending?: boolean
   onFindMatch: () => void
+  onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
-  onCleanupExpiredMatch: () => void
   onStartWith: (address: Address) => void
   onOpenChallenge: (challenge: ChallengeView) => void
-  onOpenWallet: () => void
   onNavigateAccount: (address: Address) => void
 }
 
@@ -25,11 +24,10 @@ export function MatchmakingCard({
   nowSeconds,
   txPending,
   onFindMatch,
+  onDepositAndMatchMe,
   onCancelMatch,
-  onCleanupExpiredMatch,
   onStartWith,
   onOpenChallenge,
-  onOpenWallet,
   onNavigateAccount,
 }: MatchmakingCardProps) {
   const activeMatch = snapshot?.activeMatch
@@ -38,6 +36,27 @@ export function MatchmakingCard({
   const matchFee = config?.matchFee ?? 0n
   const cancelFee = queueEntry?.cancelFeeAmount ?? config?.matchQueueCancelFee ?? 0n
   const hasEnoughBalance = appBalance >= matchFee
+  const shortfall = matchFee > appBalance ? matchFee - appBalance : 0n
+
+  // A single "Find a match" button covers both cases: when the app balance
+  // already covers the fee it just joins the queue; when it falls short it
+  // deposits the difference and joins in one transaction (which, like matchMe,
+  // also clears any expired match first). USDC approval is handled inside the
+  // write path, exactly as depositAndStakeForFriendship does.
+  const findMatchControl = (
+    <>
+      <button
+        className="primaryButton"
+        disabled={txPending || matchFee === 0n}
+        onClick={() => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))}
+      >
+        Find a match
+      </button>
+      {!hasEnoughBalance ? (
+        <small className="matchmakingDepositNote">Deposits {formatUsdc(shortfall)} USDC from your wallet to cover the match fee.</small>
+      ) : null}
+    </>
+  )
 
   if (activeMatch && account) {
     const partner = sameAddress(activeMatch.user0, account) ? activeMatch.user1 : activeMatch.user0
@@ -62,7 +81,7 @@ export function MatchmakingCard({
         {expired ? (
           <>
             <p>Your match window has ended. Clear the expired match before joining matchmaking again.</p>
-            <button className="secondaryButton" disabled={txPending} onClick={onCleanupExpiredMatch}>Clear expired match</button>
+            {findMatchControl}
           </>
         ) : (
           <>
@@ -113,14 +132,7 @@ export function MatchmakingCard({
         <div><span>Match fee</span><strong>{formatUsdc(matchFee)} USDC</strong></div>
         <div><span>Match window</span><strong>{config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'}</strong></div>
       </div>
-      {hasEnoughBalance ? (
-        <button className="primaryButton" disabled={txPending || matchFee === 0n} onClick={onFindMatch}>Find a match</button>
-      ) : (
-        <div className="matchmakingBalancePrompt">
-          <small>You need {formatUsdc(matchFee - appBalance)} more USDC in your app balance.</small>
-          <button className="secondaryButton" onClick={onOpenWallet}>Open wallet</button>
-        </div>
-      )}
+      {findMatchControl}
     </section>
   )
 }

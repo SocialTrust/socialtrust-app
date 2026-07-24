@@ -169,9 +169,8 @@ function App() {
           onStart={() => startWith()}
           onStartWith={(address) => startWith(address)}
           onFindMatch={actions.matchMe}
+          onDepositAndMatchMe={actions.depositAndMatchMe}
           onCancelMatch={actions.cancelMatchMe}
-          onCleanupExpiredMatch={actions.cleanupMyExpiredMatch}
-          onOpenWallet={() => setWalletOpen(true)}
           txPending={tx.pending}
           onOpenChallenge={openChallenge}
           onFinalize={finalize}

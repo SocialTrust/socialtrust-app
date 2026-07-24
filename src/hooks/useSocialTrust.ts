@@ -38,6 +38,7 @@ type ActionName =
   | 'steal'
   | 'finalizeFriendship'
   | 'matchMe'
+  | 'depositAndMatchMe'
   | 'cancelMatchMe'
   | 'cleanupMyExpiredMatch'
   | 'setChallengeConfig'
@@ -81,7 +82,7 @@ function txErrorMessage(error: unknown) {
 }
 
 function getUsdcAmountForAction(action: ActionName, args: readonly unknown[]) {
-  if (action === 'deposit' || action === 'fundBonusPool') return args[0] as bigint | undefined
+  if (action === 'deposit' || action === 'fundBonusPool' || action === 'depositAndMatchMe') return args[0] as bigint | undefined
   if (action === 'depositAndStakeForFriendship') return args[1] as bigint | undefined
   return undefined
 }
@@ -101,6 +102,7 @@ function successMessage(action: ActionName, args: readonly unknown[]) {
   if (action === 'steal') return 'Pot stolen and bounty credited.'
   if (action === 'finalizeFriendship') return 'Friendship finalized and stake returned.'
   if (action === 'matchMe') return 'Matchmaking request submitted.'
+  if (action === 'depositAndMatchMe') return 'USDC deposited and matchmaking joined.'
   if (action === 'cancelMatchMe') return 'Matchmaking request cancelled and the available refund returned.'
   if (action === 'cleanupMyExpiredMatch') return 'Expired match cleared.'
   if (action === 'setChallengeConfig') return 'Challenge settings updated.'
@@ -1214,6 +1216,7 @@ export function useSocialTrust() {
       'steal',
       'finalizeFriendship',
       'matchMe',
+      'depositAndMatchMe',
       'cancelMatchMe',
       'cleanupMyExpiredMatch',
     ].includes(action)
@@ -1246,6 +1249,7 @@ export function useSocialTrust() {
       'steal',
       'finalizeFriendship',
       'matchMe',
+      'depositAndMatchMe',
       'cancelMatchMe',
       'cleanupMyExpiredMatch',
     ].includes(action)
@@ -1398,6 +1402,7 @@ export function useSocialTrust() {
     steal: (other: Address) => write('steal', [other], 'Steal pot'),
     finalizeFriendship: (other: Address) => write('finalizeFriendship', [other], 'Finalize friendship'),
     matchMe: () => write('matchMe', [], 'Find a match'),
+    depositAndMatchMe: (amount: string) => write('depositAndMatchMe', [parseUsdc(amount)], 'Deposit and find match'),
     cancelMatchMe: () => write('cancelMatchMe', [], 'Cancel matchmaking'),
     cleanupMyExpiredMatch: () => write('cleanupMyExpiredMatch', [], 'Clear expired match'),
     setChallengeConfig: (values: { stakeAmt: string; cancelFee: string; rejectFee: string; durationSeconds: string; graceSeconds: string; stealBounty: string; friendshipSuccessFee: string }) => {
