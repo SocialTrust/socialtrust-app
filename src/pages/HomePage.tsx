@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { Address } from 'viem'
 import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import { challengeSortScore, getChallengeState } from '../lib/challenges'
@@ -19,32 +21,42 @@ function FriendsSection({
   friendRepScores?: Record<string, bigint>
   onNavigate: (path: string) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? friends : friends.slice(0, 4)
+
   return (
     <section className="homeSection feedSection friendsHomeSection">
       <div className="sectionHeader slimHeader">
         <h2>Friends</h2>
       </div>
       {friends.length > 0 ? (
-        <div className="friendCardList homeFriendList">
-          {friends.slice(0, 8).map((friend) => {
-            const friendProfile = friendProfiles?.[friend.toLowerCase()]
-            const friendRep = friendRepScores?.[friend.toLowerCase()] ?? 0n
-            return (
-              <button
-                className="friendRowCard friendRowTwoLine"
-                key={friend}
-                onClick={() => onNavigate(`/account/${friend}`)}
-                aria-label={`Open ${displayNameFor(friend, friendProfile)}`}
-              >
-                <ProfileAvatar address={friend} profile={friendProfile} size="sm" />
-                <span>
-                  <strong>{displayNameFor(friend, friendProfile)}</strong>
-                  <small>Reputation {String(friendRep)}</small>
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        <>
+          <div className="friendCardList homeFriendList">
+            {visible.map((friend) => {
+              const friendProfile = friendProfiles?.[friend.toLowerCase()]
+              const friendRep = friendRepScores?.[friend.toLowerCase()] ?? 0n
+              return (
+                <button
+                  className="friendRowCard friendRowTwoLine"
+                  key={friend}
+                  onClick={() => onNavigate(`/account/${friend}`)}
+                  aria-label={`Open ${displayNameFor(friend, friendProfile)}`}
+                >
+                  <ProfileAvatar address={friend} profile={friendProfile} size="sm" />
+                  <span>
+                    <strong>{displayNameFor(friend, friendProfile)}</strong>
+                    <small>Reputation {String(friendRep)}</small>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {friends.length > 4 ? (
+            <button className="feedToggle" onClick={() => setExpanded((open) => !open)}>
+              {expanded ? <>Show less <ChevronUp size={15} /></> : <>Show {friends.length - 4} more <ChevronDown size={15} /></>}
+            </button>
+          ) : null}
+        </>
       ) : (
         <p className="quietHelperText">No finalized friendships yet.</p>
       )}

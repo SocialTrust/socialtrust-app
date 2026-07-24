@@ -84,7 +84,7 @@ function App() {
 
   const openChallenge = (challenge: ChallengeView) => setSelectedChallengeKey(challenge.pairKey)
 
-  const topBarBalance = formatUsdc(snapshot?.appBalance, { compact: true })
+  const topBarBalance = formatUsdc(snapshot?.appBalance, { truncate: true })
   const topBarRep = String(snapshot?.repScore ?? 0n)
 
   const finalize = (challenge: ChallengeView) => actions.finalizeFriendship(challenge.other)
@@ -119,8 +119,14 @@ function App() {
                   <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
                 </button>
                 <div className="topBarMetrics" aria-label="Account balance and reputation">
-                  <span>{topBarBalance} USDC</span>
-                  <span>Rep {topBarRep}</span>
+                  <span className="metricLine">
+                    <span className="metricSymbol metricSymbolUsdc" aria-hidden="true">$</span>
+                    <span className="metricValue">{topBarBalance}</span>
+                  </span>
+                  <span className="metricLine">
+                    <span className="metricSymbol metricSymbolRep" aria-hidden="true">{'\u2605\uFE0E'}</span>
+                    <span className="metricValue">{topBarRep}</span>
+                  </span>
                 </div>
                 {profileOpen ? (
                   <ProfilePopover
@@ -207,6 +213,7 @@ function App() {
       <StartFriendshipSheet
         open={startOpen}
         initialOther={startOther}
+        account={account}
         config={config}
         snapshot={snapshot}
         isConnected={isConnected}
@@ -220,10 +227,8 @@ function App() {
         open={walletOpen}
         snapshot={snapshot}
         onClose={() => setWalletOpen(false)}
-        onApprove={actions.approveUsdc}
         onDeposit={actions.deposit}
         onWithdraw={actions.withdraw}
-        onFundBonusPool={actions.fundBonusPool}
       />
 
       <ChallengeDetailSheet
@@ -251,9 +256,9 @@ function App() {
         onClose={() => setMenuOpen(false)}
         onConnect={connect}
         onDisconnect={disconnect}
+        onStart={() => startWith()}
         onOpenWallet={() => setWalletOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
-        onNavigate={navigate}
       />
 
       <ProfileEditSheet

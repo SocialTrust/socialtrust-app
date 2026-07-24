@@ -8,8 +8,12 @@ export function shortAddress(address?: string, chars = 4) {
   return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`
 }
 
-export function formatUsdc(value?: bigint, opts?: { compact?: boolean }) {
-  const amount = Number(value ?? 0n) / 1_000_000
+export function formatUsdc(value?: bigint, opts?: { compact?: boolean; truncate?: boolean }) {
+  let raw = value ?? 0n
+  // Truncating to whole cents (rather than rounding) guarantees a balance is
+  // never displayed higher than what the account actually holds.
+  if (opts?.truncate) raw -= raw % 10_000n
+  const amount = Number(raw) / 1_000_000
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: opts?.compact ? 0 : 2,
     maximumFractionDigits: opts?.compact ? 2 : 2,
