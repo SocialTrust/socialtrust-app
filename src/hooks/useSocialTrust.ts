@@ -866,11 +866,17 @@ export function useSocialTrust() {
     setSnapshot(updated)
   }, [readMatchStateOnChain, readSocialProfile])
 
-  const refreshGraphStateOnly = useCallback(async (user: Address) => {
+  // matchBlockNumber pins the on-chain queue/match reads to a known block —
+  // normally the confirmed receipt block of the write that triggered this
+  // refresh. Without it these reads use "latest", and because the subgraph can
+  // run ahead of a given RPC node's latest height, a post-write refresh could
+  // read pre-transaction match state and clobber the freshly confirmed value,
+  // flipping the hero back to its old state until a manual refresh.
+  const refreshGraphStateOnly = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
     try {
       const [graphState, matchState] = await Promise.all([
         readGraphState(user),
-        readMatchStateOnChain(user),
+        readMatchStateOnChain(user, matchBlockNumber),
       ])
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
 
@@ -909,7 +915,7 @@ export function useSocialTrust() {
     }
   }, [readContract, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
-  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`) => {
+  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`, matchBlockNumber?: bigint) => {
     const pollId = graphPollSeqRef.current + 1
     graphPollSeqRef.current = pollId
 
@@ -925,7 +931,7 @@ export function useSocialTrust() {
         )
 
         if (indexed) {
-          await refreshGraphStateOnly(user)
+          await refreshGraphStateOnly(user, matchBlockNumber)
           return
         }
       } catch (error) {
@@ -934,7 +940,7 @@ export function useSocialTrust() {
     }
 
     if (graphPollSeqRef.current === pollId) {
-      await refreshGraphStateOnly(user)
+      await refreshGraphStateOnly(user, matchBlockNumber)
     }
   }, [readGraphState, refreshGraphStateOnly])
 
@@ -1245,6 +1251,24 @@ export function useSocialTrust() {
     }
   }, [refreshCoreStateOnly])
 
+  // Match-changing writes refresh balance and match state together. The two run
+  // sequentially per tick (not concurrently) because each does a non-atomic
+  // read-modify-write on the snapshot and would otherwise race. Match reads are
+  // pinned to the confirmed receipt block so a lagging RPC "latest" can never
+  // reintroduce pre-transaction queue/match state.
+  const retryBalanceAndMatchAfterWrite = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
+    for (const delayMs of [350, 1000, 2000]) {
+      await sleep(delayMs)
+      if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+      try {
+        await refreshCoreStateOnly(user)
+        await refreshMatchStateOnly(user, matchBlockNumber)
+      } catch (error) {
+        console.warn(`Post-transaction balance/match refresh retry after ${delayMs}ms failed.`, error)
+      }
+    }
+  }, [refreshCoreStateOnly, refreshMatchStateOnly])
+
   const refreshAfterWrite = useCallback(async (action: ActionName, args: readonly unknown[]) => {
     if (!account) return
     await loadConfig()
@@ -1363,12 +1387,16 @@ export function useSocialTrust() {
 
     void (async () => {
       await Promise.all([
-        balanceChanging ? retryCoreStateAfterWrite(writer) : refreshCoreStateOnly(writer).catch(() => undefined),
+        matchChanging
+          ? retryBalanceAndMatchAfterWrite(writer, receipt.blockNumber)
+          : balanceChanging
+            ? retryCoreStateAfterWrite(writer)
+            : refreshCoreStateOnly(writer).catch(() => undefined),
         refreshAfterWrite(action, args).catch(() => undefined),
       ])
-      if (graphTracked) await pollGraphForTransaction(writer, hash)
+      if (graphTracked) await pollGraphForTransaction(writer, hash, matchChanging ? receipt.blockNumber : undefined)
     })()
-  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryCoreStateAfterWrite])
+  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
 
   const write = useCallback(async (action: ActionName, args: readonly unknown[] = [], label = 'Confirm transaction'): Promise<boolean> => {
     if (appConfig.isMockMode) {
