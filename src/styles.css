@@ -1362,6 +1362,11 @@ body {
 }
 .matchStatusWarning { color: var(--warning); }
 .matchStatusTrust { color: var(--trust); }
+.matchStatusWarning .matchStatusDot { animation: matchStatusPulse 1.8s ease-in-out infinite; }
+@keyframes matchStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 .matchPartnerLink {
   display: inline-flex;
   align-items: center;
