@@ -166,11 +166,11 @@ function App() {
           snapshot={snapshot}
           isLoading={isLoading}
           onConnect={connect}
-          onStart={() => startWith()}
           onStartWith={(address) => startWith(address)}
           onFindMatch={actions.matchMe}
           onDepositAndMatchMe={actions.depositAndMatchMe}
           onCancelMatch={actions.cancelMatchMe}
+          onSetTelegramUsername={actions.setTelegramUsername}
           txPending={tx.pending}
           onOpenChallenge={openChallenge}
           onFinalize={finalize}

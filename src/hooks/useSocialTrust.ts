@@ -121,6 +121,77 @@ function walletConnectionError() {
   return 'Wallet modal is not ready yet. Try again in a moment.'
 }
 
+// Profile field normalization + validation. setProfile overwrites the whole
+// profile on chain, so these run on both the full multi-field save and every
+// per-field helper to keep a single source of truth for what gets stored.
+export type ProfileField = 'displayName' | 'xUsername' | 'telegramUsername' | 'discordUsername' | 'imgUrl'
+
+const PROFILE_FIELD_LABEL: Record<ProfileField, string> = {
+  displayName: 'Display name',
+  xUsername: 'X username',
+  telegramUsername: 'Telegram username',
+  discordUsername: 'Discord username',
+  imgUrl: 'Image URL',
+}
+
+// Turn a pasted handle or profile URL into a bare username: drop a leading "@",
+// strip a "t.me/", "x.com/", or "twitter.com/" prefix (with optional scheme /
+// "www."), keep only the first path segment, trim, and lowercase.
+function normalizeHandleInput(raw: string): string {
+  let value = (raw ?? '').trim()
+  value = value.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
+  value = value.replace(/^(?:t\.me|telegram\.me|x\.com|twitter\.com)\//i, '')
+  value = value.replace(/^@+/, '')
+  value = value.split(/[/?#]/)[0]
+  return value.trim().toLowerCase()
+}
+
+function normalizeDisplayNameInput(raw: string): string {
+  return (raw ?? '').trim().replace(/\s+/g, ' ')
+}
+
+function normalizeImgUrlInput(raw: string): string {
+  return (raw ?? '').trim()
+}
+
+function normalizeProfileField(field: ProfileField, raw: string): string {
+  if (field === 'displayName') return normalizeDisplayNameInput(raw)
+  if (field === 'imgUrl') return normalizeImgUrlInput(raw)
+  return normalizeHandleInput(raw)
+}
+
+// Validate an already-normalized value. Returns an error string or null. Empty
+// handles/URLs are allowed here (the full save may legitimately clear a field);
+// per-field helpers reject empties before calling this.
+function validateProfileField(field: ProfileField, value: string): string | null {
+  if (field === 'displayName') {
+    if (!value) return 'Display name is required.'
+    if (value.length > 64) return 'Display name must be 64 characters or less.'
+    if (!/^[A-Za-z0-9_. -]+$/.test(value)) return 'Display name can only use letters, numbers, spaces, underscores, dashes, and periods.'
+    if (!/[A-Za-z0-9]/.test(value)) return 'Display name needs at least one letter or number.'
+    return null
+  }
+  if (field === 'xUsername') {
+    if (value && !/^[a-z0-9_]{5,15}$/.test(value)) return 'X username must be 5–15 lowercase letters, numbers, or underscores.'
+    return null
+  }
+  if (field === 'telegramUsername') {
+    if (value && !/^[a-z0-9_]{5,32}$/.test(value)) return 'Telegram username must be 5–32 lowercase letters, numbers, or underscores.'
+    return null
+  }
+  if (field === 'discordUsername') {
+    if (value && !/^[a-z0-9_.]{2,32}$/.test(value)) return 'Discord username must be 2–32 lowercase letters, numbers, underscores, or periods.'
+    return null
+  }
+  // imgUrl
+  if (value && (!value.startsWith('https://') || /\s/.test(value) || value.length > 1024)) return 'Image URL must be a valid https:// URL without spaces.'
+  return null
+}
+
+function profileToArgs(profile: SocialProfile): [string, string, string, string, string] {
+  return [profile.displayName, profile.xUsername, profile.telegramUsername, profile.discordUsername, profile.imgUrl]
+}
+
 type GraphChallenge = {
   id: string
   pairKey: `0x${string}`
@@ -791,13 +862,97 @@ export function useSocialTrust() {
     return nextConfig
   }, [readContract])
 
-  const refreshGraphStateOnly = useCallback(async (user: Address) => {
+  // Queue and match state are read authoritatively from the chain rather than
+  // from The Graph. The subgraph lags block confirmation by seconds, which left
+  // the matchmaking hero stuck on "Available" after a confirmed matchMe until an
+  // indexer caught up. RPC reflects the receipt immediately, so the hero flips
+  // the moment the transaction resolves. The subgraph is still used for the
+  // partner profile, activity feed, friends, and challenges.
+  const readMatchQueueEntryOnChain = useCallback(async (user: Address, blockNumber?: bigint): Promise<MatchQueueState | undefined> => {
+    const inQueue = await readContract<boolean>('isInMatchQueue', [user], blockNumber)
+    if (!inQueue) return undefined
+    const entry = await readContract<Record<string, unknown> & Record<number, unknown>>('matchQueueEntries', [user], blockNumber)
+    const queuedUser = (entry.user ?? entry[0]) as Address | undefined
+    if (!queuedUser || sameAddress(queuedUser, ZERO_ADDRESS)) return undefined
+    return {
+      user: queuedUser,
+      feeAmount: toBigIntValue(entry.feeAmount ?? entry[1]),
+      cancelFeeAmount: toBigIntValue(entry.cancelFeeAmount ?? entry[2]),
+      queuedAt: toBigIntValue(entry.queuedAt ?? entry[3]),
+      status: 'QUEUED',
+    }
+  }, [readContract, toBigIntValue])
+
+  const readActiveMatchOnChain = useCallback(async (user: Address, blockNumber?: bigint): Promise<MatchState | undefined> => {
+    const matchId = await readContract<bigint>('activeMatchIdOf', [user], blockNumber)
+    if (!matchId || matchId === 0n) return undefined
+    const match = await readContract<Record<string, unknown> & Record<number, unknown>>('matches', [matchId], blockNumber)
+    const user0 = (match.user0 ?? match[0]) as Address | undefined
+    const user1 = (match.user1 ?? match[1]) as Address | undefined
+    if (!user0 || !user1 || sameAddress(user0, ZERO_ADDRESS)) return undefined
+    // A resolved match (finalized or cleaned up) is no longer active. Expired but
+    // not-yet-cleaned matches still return here; the hero renders them as
+    // Available via its own deadline check, matching the prior subgraph behavior.
+    if (Boolean(match.resolved ?? match[6] ?? false)) return undefined
+    return {
+      id: String(matchId),
+      matchId,
+      user0,
+      user1,
+      feeAmount0: toBigIntValue(match.feeAmount0 ?? match[2]),
+      feeAmount1: toBigIntValue(match.feeAmount1 ?? match[3]),
+      matchedAt: toBigIntValue(match.matchedAt ?? match[4]),
+      deadline: toBigIntValue(match.deadline ?? match[5]),
+      status: 'ACTIVE',
+    }
+  }, [readContract, toBigIntValue])
+
+  const readMatchStateOnChain = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const [currentQueueEntry, activeMatch] = await Promise.all([
+      readMatchQueueEntryOnChain(user, blockNumber),
+      readActiveMatchOnChain(user, blockNumber),
+    ])
+    return { currentQueueEntry, activeMatch }
+  }, [readActiveMatchOnChain, readMatchQueueEntryOnChain])
+
+  const refreshMatchStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const { currentQueueEntry, activeMatch } = await readMatchStateOnChain(user, blockNumber)
+    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+
+    const partner = activeMatch
+      ? (sameAddress(activeMatch.user0, user) ? activeMatch.user1 : activeMatch.user0)
+      : undefined
+    const matchPartnerProfile = partner ? await readSocialProfile(partner).catch(() => undefined) : undefined
+    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+
+    const current = snapshotRef.current
+    if (!current) return
+    const updated = {
+      ...current,
+      currentQueueEntry,
+      activeMatch,
+      matchPartnerProfile: partner ? matchPartnerProfile : undefined,
+    }
+    snapshotRef.current = updated
+    setSnapshot(updated)
+  }, [readMatchStateOnChain, readSocialProfile])
+
+  // matchBlockNumber pins the on-chain queue/match reads to a known block —
+  // normally the confirmed receipt block of the write that triggered this
+  // refresh. Without it these reads use "latest", and because the subgraph can
+  // run ahead of a given RPC node's latest height, a post-write refresh could
+  // read pre-transaction match state and clobber the freshly confirmed value,
+  // flipping the hero back to its old state until a manual refresh.
+  const refreshGraphStateOnly = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
     try {
-      const graphState = await readGraphState(user)
+      const [graphState, matchState] = await Promise.all([
+        readGraphState(user),
+        readMatchStateOnChain(user, matchBlockNumber),
+      ])
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
 
-      const matchPartner = graphState.activeMatch
-        ? (sameAddress(graphState.activeMatch.user0, user) ? graphState.activeMatch.user1 : graphState.activeMatch.user0)
+      const matchPartner = matchState.activeMatch
+        ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
         : undefined
       const [friendProfiles, friendRepPairs, matchPartnerProfile] = await Promise.all([
         readSocialProfiles(graphState.friends),
@@ -814,9 +969,9 @@ export function useSocialTrust() {
           friends: graphState.friends,
           challenges: graphState.challenges,
           recentActivity: graphState.recentActivity,
-          currentQueueEntry: graphState.currentQueueEntry,
-          activeMatch: graphState.activeMatch,
-          matchPartnerProfile,
+          currentQueueEntry: matchState.currentQueueEntry,
+          activeMatch: matchState.activeMatch,
+          matchPartnerProfile: matchPartner ? matchPartnerProfile : undefined,
           friendProfiles,
           friendRepScores,
         }
@@ -829,9 +984,9 @@ export function useSocialTrust() {
       console.warn('The Graph state refresh failed.', error)
       return undefined
     }
-  }, [readContract, readGraphState, readSocialProfile, readSocialProfiles])
+  }, [readContract, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
-  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`) => {
+  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`, matchBlockNumber?: bigint) => {
     const pollId = graphPollSeqRef.current + 1
     graphPollSeqRef.current = pollId
 
@@ -847,7 +1002,7 @@ export function useSocialTrust() {
         )
 
         if (indexed) {
-          await refreshGraphStateOnly(user)
+          await refreshGraphStateOnly(user, matchBlockNumber)
           return
         }
       } catch (error) {
@@ -856,7 +1011,7 @@ export function useSocialTrust() {
     }
 
     if (graphPollSeqRef.current === pollId) {
-      await refreshGraphStateOnly(user)
+      await refreshGraphStateOnly(user, matchBlockNumber)
     }
   }, [readGraphState, refreshGraphStateOnly])
 
@@ -890,6 +1045,7 @@ export function useSocialTrust() {
       owner,
       walletUsdc,
       allowance,
+      matchState,
       graphState,
     ] = await Promise.all([
       readContract<bigint>('balances', [user]),
@@ -899,6 +1055,10 @@ export function useSocialTrust() {
       readContract<Address>('owner'),
       appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? Promise.resolve(0n) : readErc20<bigint>('balanceOf', [user]),
       appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? Promise.resolve(0n) : readErc20<bigint>('allowance', [user, appConfig.contractAddress]),
+      readMatchStateOnChain(user).catch((error) => {
+        console.warn('On-chain match state read failed; preserving the last known match state.', error)
+        return { currentQueueEntry: previousSnapshot?.currentQueueEntry, activeMatch: previousSnapshot?.activeMatch }
+      }),
       graphStatePromise,
     ])
 
@@ -913,8 +1073,8 @@ export function useSocialTrust() {
       friends: graphState.friends,
       challenges: graphState.challenges,
       recentActivity: graphState.recentActivity,
-      currentQueueEntry: graphState.currentQueueEntry,
-      activeMatch: graphState.activeMatch,
+      currentQueueEntry: matchState.currentQueueEntry,
+      activeMatch: matchState.activeMatch,
       owner,
       socialProfile: previousSnapshot?.socialProfile,
       friendProfiles: previousSnapshot?.friendProfiles,
@@ -924,8 +1084,8 @@ export function useSocialTrust() {
     snapshotRef.current = nextSnapshot
     setSnapshot(nextSnapshot)
 
-    const matchPartner = graphState.activeMatch
-      ? (sameAddress(graphState.activeMatch.user0, user) ? graphState.activeMatch.user1 : graphState.activeMatch.user0)
+    const matchPartner = matchState.activeMatch
+      ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
       : undefined
 
     void Promise.all([
@@ -947,7 +1107,7 @@ export function useSocialTrust() {
     })
 
     return nextSnapshot
-  }, [readContract, readErc20, readGraphState, readSocialProfile, readSocialProfiles])
+  }, [readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
   const refresh = useCallback(async () => {
     setIsLoading(true)
@@ -1162,6 +1322,24 @@ export function useSocialTrust() {
     }
   }, [refreshCoreStateOnly])
 
+  // Match-changing writes refresh balance and match state together. The two run
+  // sequentially per tick (not concurrently) because each does a non-atomic
+  // read-modify-write on the snapshot and would otherwise race. Match reads are
+  // pinned to the confirmed receipt block so a lagging RPC "latest" can never
+  // reintroduce pre-transaction queue/match state.
+  const retryBalanceAndMatchAfterWrite = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
+    for (const delayMs of [350, 1000, 2000]) {
+      await sleep(delayMs)
+      if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+      try {
+        await refreshCoreStateOnly(user)
+        await refreshMatchStateOnly(user, matchBlockNumber)
+      } catch (error) {
+        console.warn(`Post-transaction balance/match refresh retry after ${delayMs}ms failed.`, error)
+      }
+    }
+  }, [refreshCoreStateOnly, refreshMatchStateOnly])
+
   const refreshAfterWrite = useCallback(async (action: ActionName, args: readonly unknown[]) => {
     if (!account) return
     await loadConfig()
@@ -1221,19 +1399,43 @@ export function useSocialTrust() {
       'cleanupMyExpiredMatch',
     ].includes(action)
 
-    // Balance-changing writes must update authoritative RPC state before the
-    // action resolves. This keeps the top bar and wallet sheet in sync with
-    // the confirmed receipt instead of waiting for a detached refresh task.
-    if (balanceChanging) {
+    const matchChanging = [
+      'matchMe',
+      'depositAndMatchMe',
+      'cancelMatchMe',
+      'cleanupMyExpiredMatch',
+    ].includes(action)
+
+    // Balance- and match-changing writes must update authoritative RPC state
+    // before the action resolves. This keeps the top bar, wallet sheet, and
+    // matchmaking hero in sync with the confirmed receipt instead of waiting
+    // for the detached subgraph poll (which lags block confirmation).
+    //
+    // These two refreshes run sequentially, not in parallel: each does a
+    // non-atomic read-modify-write on snapshotRef.current (spread the current
+    // snapshot, overwrite its own fields, write it back). Run concurrently they
+    // race — whichever resolves last spreads a stale base and clobbers the
+    // other's fields. In practice the match refresh short-circuits fast when
+    // cancelling (not in queue, no match), lost the race to the slower balance
+    // refresh, and left the hero stuck on "Searching" until a manual refresh.
+    if (balanceChanging || matchChanging) {
       try {
         // Read at the confirmed receipt block so the UI cannot observe a
         // pre-transaction "latest" value from a lagging RPC edge.
-        await refreshCoreStateOnly(writer, receipt.blockNumber)
+        if (balanceChanging) await refreshCoreStateOnly(writer, receipt.blockNumber)
+        if (matchChanging) await refreshMatchStateOnly(writer, receipt.blockNumber)
       } catch (error) {
-        console.warn('Confirmed balance refresh at receipt block failed; retrying latest state.', error)
-        await refreshCoreStateOnly(writer).catch((retryError) => {
-          console.warn('Confirmed balance refresh retry failed.', retryError)
-        })
+        console.warn('Confirmed state refresh at receipt block failed; retrying latest state.', error)
+        if (balanceChanging) {
+          await refreshCoreStateOnly(writer).catch((retryError) => {
+            console.warn('Confirmed balance refresh retry failed.', retryError)
+          })
+        }
+        if (matchChanging) {
+          await refreshMatchStateOnly(writer).catch((retryError) => {
+            console.warn('Confirmed match-state refresh retry failed.', retryError)
+          })
+        }
       }
     }
 
@@ -1256,12 +1458,16 @@ export function useSocialTrust() {
 
     void (async () => {
       await Promise.all([
-        balanceChanging ? retryCoreStateAfterWrite(writer) : refreshCoreStateOnly(writer).catch(() => undefined),
+        matchChanging
+          ? retryBalanceAndMatchAfterWrite(writer, receipt.blockNumber)
+          : balanceChanging
+            ? retryCoreStateAfterWrite(writer)
+            : refreshCoreStateOnly(writer).catch(() => undefined),
         refreshAfterWrite(action, args).catch(() => undefined),
       ])
-      if (graphTracked) await pollGraphForTransaction(writer, hash)
+      if (graphTracked) await pollGraphForTransaction(writer, hash, matchChanging ? receipt.blockNumber : undefined)
     })()
-  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, retryCoreStateAfterWrite])
+  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
 
   const write = useCallback(async (action: ActionName, args: readonly unknown[] = [], label = 'Confirm transaction'): Promise<boolean> => {
     if (appConfig.isMockMode) {
@@ -1378,6 +1584,25 @@ export function useSocialTrust() {
     }
   }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, readErc20, refresh, switchChainAsync, walletClient])
 
+  // Replace a single profile field without ever hand-building a full profile at
+  // the call site. Because setProfile overwrites all five fields, we read the
+  // caller's current profile fresh from chain (never a stale query cache),
+  // replace only the target field, and write the merged whole back.
+  const submitProfileField = useCallback(async (field: ProfileField, rawValue: string): Promise<boolean | void> => {
+    if (!account) return setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
+    if (!appConfig.hasProfiles) return setTx({ pending: false, label: '', error: 'Set VITE_PROFILES_ADDRESS before editing profiles.' })
+
+    const value = normalizeProfileField(field, rawValue)
+    if (!value) return setTx({ pending: false, label: '', error: `${PROFILE_FIELD_LABEL[field]} can't be empty.` })
+
+    const fieldError = validateProfileField(field, value)
+    if (fieldError) return setTx({ pending: false, label: '', error: fieldError })
+
+    const current = await readSocialProfile(account)
+    const merged: SocialProfile = { ...current, [field]: value }
+    return write('setProfile', profileToArgs(merged), 'Save profile')
+  }, [account, readSocialProfile, write])
+
   const actions = useMemo(() => ({
     approveUsdc: () => write('approveUsdc', [], 'Approve USDC'),
     deposit: (amount: string) => write('deposit', [parseUsdc(amount)], 'Deposit USDC'),
@@ -1440,23 +1665,41 @@ export function useSocialTrust() {
       if (!isAddressLike(userAddress)) return setTx({ pending: false, label: '', error: 'Enter a valid wallet address.' })
       return write('setScore', [userAddress, BigInt(score || '0')], 'Set reputation score')
     },
-    setProfile: (values: { displayName: string; xUsername: string; telegramUsername: string; imgUrl: string }) => {
-      const displayName = values.displayName.trim().replace(/\s+/g, ' ')
-      const xUsername = values.xUsername.trim().replace(/^@/, '').toLowerCase()
-      const telegramUsername = values.telegramUsername.trim().replace(/^@/, '').toLowerCase()
-      const imgUrl = values.imgUrl.trim()
+    // Full multi-field save used by the profile edit sheet. It legitimately
+    // sets every field the sheet exposes, but reads the current profile fresh
+    // to preserve fields the sheet does not manage (e.g. Discord) instead of
+    // blanking them.
+    setProfile: async (values: { displayName: string; xUsername: string; telegramUsername: string; imgUrl: string }) => {
+      if (!account) return setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
+      if (!appConfig.hasProfiles) return setTx({ pending: false, label: '', error: 'Set VITE_PROFILES_ADDRESS before editing profiles.' })
 
-      if (!displayName) return setTx({ pending: false, label: '', error: 'Display name is required.' })
-      if (displayName.length > 64) return setTx({ pending: false, label: '', error: 'Display name must be 64 characters or less.' })
-      if (!/^[A-Za-z0-9_. -]+$/.test(displayName)) return setTx({ pending: false, label: '', error: 'Display name can only use letters, numbers, spaces, underscores, dashes, and periods.' })
-      if (!/[A-Za-z0-9]/.test(displayName)) return setTx({ pending: false, label: '', error: 'Display name needs at least one letter or number.' })
-      if (xUsername && !/^[a-z0-9_]{5,15}$/.test(xUsername)) return setTx({ pending: false, label: '', error: 'X username must be 5–15 lowercase letters, numbers, or underscores.' })
-      if (telegramUsername && !/^[a-z0-9_]{5,32}$/.test(telegramUsername)) return setTx({ pending: false, label: '', error: 'Telegram username must be 5–32 lowercase letters, numbers, or underscores.' })
-      if (imgUrl && (!imgUrl.startsWith('https://') || /\s/.test(imgUrl) || imgUrl.length > 1024)) return setTx({ pending: false, label: '', error: 'Image URL must be a valid https:// URL without spaces.' })
+      const displayName = normalizeProfileField('displayName', values.displayName)
+      const xUsername = normalizeProfileField('xUsername', values.xUsername)
+      const telegramUsername = normalizeProfileField('telegramUsername', values.telegramUsername)
+      const imgUrl = normalizeProfileField('imgUrl', values.imgUrl)
 
-      return write('setProfile', [displayName, xUsername, telegramUsername, '', imgUrl], 'Save profile')
+      for (const [field, value] of [
+        ['displayName', displayName],
+        ['xUsername', xUsername],
+        ['telegramUsername', telegramUsername],
+        ['imgUrl', imgUrl],
+      ] as const) {
+        const error = validateProfileField(field, value)
+        if (error) return setTx({ pending: false, label: '', error })
+      }
+
+      const current = await readSocialProfile(account)
+      return write('setProfile', [displayName, xUsername, telegramUsername, current.discordUsername, imgUrl], 'Save profile')
     },
-  }), [write])
+    // Per-field helpers. Every single-field profile update must go through one
+    // of these so no call site hand-builds a full profile (and risks blanking
+    // the others).
+    setDisplayName: (name: string) => submitProfileField('displayName', name),
+    setXUsername: (handle: string) => submitProfileField('xUsername', handle),
+    setTelegramUsername: (handle: string) => submitProfileField('telegramUsername', handle),
+    setDiscordUsername: (handle: string) => submitProfileField('discordUsername', handle),
+    setImgUrl: (url: string) => submitProfileField('imgUrl', url),
+  }), [account, readSocialProfile, submitProfileField, write])
 
   return {
     account,

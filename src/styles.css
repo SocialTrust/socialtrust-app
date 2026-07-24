@@ -1340,37 +1340,88 @@ body {
   }
 }
 
-/* Matchmaking */
-.matchmakingCard {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 26px;
-  padding: 20px;
-  display: grid;
-  gap: 14px;
-  box-shadow: var(--shadow);
+/* Matchmaking hero */
+.matchStatusLine {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
 }
-.matchmakingCard h3 { margin: 0; font-size: 1.35rem; letter-spacing: -0.045em; }
-.matchmakingCard p { margin: 0; color: var(--muted); line-height: 1.55; }
-.matchmakingTopline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.matchmakingStatus { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; color: var(--muted); background: var(--soft); font-size: 0.76rem; font-weight: 900; }
-.matchmakingFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.matchmakingFacts div { border: 1px solid var(--line); background: var(--soft); border-radius: 16px; padding: 11px 12px; }
-.matchmakingFacts span { display: block; color: var(--muted); font-size: 0.76rem; font-weight: 800; margin-bottom: 4px; }
-.matchmakingFacts strong { font-size: 0.92rem; }
-.matchmakingQueued { border-style: dashed; }
-.matchmakingMatched { border-color: var(--line-strong); }
-.matchmakingExpired { background: var(--soft); }
-.matchPartnerRow { width: 100%; display: flex; align-items: center; gap: 11px; border: 1px solid var(--line); background: var(--soft); border-radius: 18px; padding: 12px; color: var(--ink); text-align: left; }
-.matchPartnerRow > span { min-width: 0; }
-.matchPartnerRow strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.matchPartnerRow small { display: block; margin-top: 3px; color: var(--muted); }
-.matchmakingDepositNote { display: block; margin-top: 8px; color: var(--muted); line-height: 1.4; }
-
-@media (max-width: 620px) {
-  .matchmakingFacts { grid-template-columns: 1fr; }
-  .matchmakingCard > .primaryButton,
-  .matchmakingCard > .secondaryButton { width: 100%; }
+.matchStatusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.matchStatusLabel {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.matchStatusWarning { color: var(--warning); }
+.matchStatusTrust { color: var(--trust); }
+.matchStatusWarning .matchStatusDot { animation: matchStatusPulse 1.8s ease-in-out infinite; }
+@keyframes matchStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.matchPartnerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+}
+.matchPartnerAddress {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.matchHandleField {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(320px, 100%);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  transition: border-color 160ms ease, background 160ms ease;
+  animation: matchHandleReveal 260ms ease both;
+}
+.matchHandleField:focus-within {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+.matchHandlePrefix {
+  color: var(--muted);
+  font-weight: 800;
+}
+.matchHandleInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 12px 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-variant-numeric: tabular-nums;
+}
+.matchHandleInput:focus {
+  outline: none;
+}
+@keyframes matchHandleReveal {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.heroCaption {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 /* v42 action-menu redesign of the main menu sheet */
