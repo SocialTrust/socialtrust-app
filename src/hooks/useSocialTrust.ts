@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Abi, Address } from 'viem'
+import type { Address } from 'viem'
 import { createPublicClient, http, maxUint256 } from 'viem'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi'
@@ -7,7 +7,6 @@ import { socialTrustAbi, erc20Abi } from '../contracts/socialTrustAbi'
 import { socialTrustProfilesAbi } from '../contracts/socialTrustProfilesAbi'
 import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
 import { appConfig, configuredChain } from '../lib/config'
-import { sendBatchedCalls } from '../lib/batch'
 import { isAddressLike, parseUsdc, sameAddress, ZERO_ADDRESS } from '../lib/format'
 import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
 
@@ -1371,7 +1370,7 @@ export function useSocialTrust() {
     }
   }, [account, loadConfig, readChallengeViewForOther, removeChallengeFromSnapshot, upsertChallengeInSnapshot])
 
-  // Shared post-confirmation work for both the batched and sequential paths.
+  // Shared post-confirmation work for contract writes.
   const finishWrite = useCallback(async (
     action: ActionName,
     args: readonly unknown[],
@@ -1502,44 +1501,6 @@ export function useSocialTrust() {
       await ensureWalletChain()
       const usdcAmount = getUsdcAmountForAction(action, args)
 
-      // Smart accounts can run approve + action in one confirmation. Try that
-      // first, so a first-time staker gets a single Face ID prompt instead of
-      // two prompts with a receipt wait between them. EOA wallets reject the
-      // request and fall through to the sequential path below.
-      if (typeof usdcAmount === 'bigint' && usdcAmount > 0n && action !== 'approveUsdc') {
-        const [currentAllowance, walletUsdc] = await Promise.all([
-          readErc20<bigint>('allowance', [account, appConfig.contractAddress]),
-          readErc20<bigint>('balanceOf', [account]),
-        ])
-
-        if (walletUsdc < usdcAmount) throw new Error('Your wallet USDC balance is too low for that amount.')
-
-        if (currentAllowance < usdcAmount) {
-          setTx({ pending: true, label })
-          const batched = await sendBatchedCalls(walletClient, account, appConfig.chainId, [
-            {
-              to: appConfig.usdcAddress,
-              abi: erc20Abi as Abi,
-              functionName: 'approve',
-              args: [appConfig.contractAddress, usdcAmount],
-            },
-            {
-              to: appConfig.contractAddress,
-              abi: socialTrustAbi as Abi,
-              functionName: action,
-              args,
-            },
-          ])
-
-          if (batched.supported) {
-            const batchHash = batched.hashes[batched.hashes.length - 1]
-            if (batchHash) await finishWrite(action, args, label, batchHash)
-            else setTx({ pending: false, label, success: successMessage(action, args) })
-            return true
-          }
-        }
-      }
-
       if (typeof usdcAmount === 'bigint') await ensureUsdcAllowance(usdcAmount)
 
       setTx({ pending: true, label })
@@ -1582,7 +1543,7 @@ export function useSocialTrust() {
       await refresh().catch(() => undefined)
       return false
     }
-  }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, readErc20, refresh, switchChainAsync, walletClient])
+  }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, refresh, switchChainAsync, walletClient])
 
   // Replace a single profile field without ever hand-building a full profile at
   // the call site. Because setProfile overwrites all five fields, we read the

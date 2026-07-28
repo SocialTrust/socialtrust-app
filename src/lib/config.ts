@@ -15,7 +15,6 @@ const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 
 const graphUrl = String(import.meta.env.VITE_GRAPH_URL || import.meta.env.VITE_GRAPH_ACTIVITY_URL || '').trim()
 const graphFlag = String(import.meta.env.VITE_GRAPH_ENABLED || import.meta.env.VITE_GRAPH_ACTIVITY_ENABLED || '').toLowerCase()
 const paymasterUrl = String(import.meta.env.VITE_PAYMASTER_URL || '').trim()
-const batchFlag = String(import.meta.env.VITE_BATCH_CALLS || 'true').toLowerCase()
 
 const appUrl = (import.meta.env.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')
 
@@ -56,9 +55,6 @@ export const appConfig = {
   graphEnabled: graphFlag === 'true' && graphUrl.length > 0,
   appUrl,
   paymasterUrl,
-  // EIP-5792 batching collapses approve + deposit into a single confirmation on
-  // smart accounts. Disable to force the legacy sequential path.
-  batchCalls: batchFlag !== 'false',
 }
 
 // Kept for callers that still import the old name.
