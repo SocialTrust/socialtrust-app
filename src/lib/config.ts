@@ -59,3 +59,12 @@ export const appConfig = {
 
 // Kept for callers that still import the old name.
 export const configuredChain = appChain
+
+// Block explorer links come from the configured chain itself, so a chain change
+// moves the links with it and an unknown chain simply renders no link at all.
+export const explorerBaseUrl = (appChain.blockExplorers?.default?.url ?? '').replace(/\/$/, '')
+
+export function transactionUrl(hash?: string) {
+  if (!hash || !explorerBaseUrl) return undefined
+  return `${explorerBaseUrl}/tx/${hash}`
+}

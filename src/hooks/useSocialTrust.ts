@@ -340,6 +340,19 @@ async function readGraphAccountData(user: Address): Promise<GraphAccountData> {
   }
 }
 
+/**
+ * Which accounts need a profile fetched for display. Friend rows need one, and
+ * so does every challenge counterparty and activity counterparty, or the
+ * attention rows and the activity feed fall back to raw addresses.
+ */
+function profileTargets(state: { friends: Address[]; challenges: ChallengeView[]; recentActivity: ActivityItem[] }): Address[] {
+  return [
+    ...state.friends,
+    ...state.challenges.map((challenge) => challenge.other),
+    ...state.recentActivity.map((activity) => activity.other).filter((other): other is Address => Boolean(other)),
+  ].filter((address) => !sameAddress(address, ZERO_ADDRESS))
+}
+
 function graphActivityToItem(entry: GraphActivity): ActivityItem {
   const amount = entry.amount == null ? undefined : BigInt(entry.amount)
   const bonusAmount = entry.bonusAmount == null ? 0n : BigInt(entry.bonusAmount)
@@ -397,6 +410,9 @@ export function useSocialTrust() {
   const [config, setConfig] = useState<ContractConfig | undefined>(appConfig.isMockMode ? mockConfig : undefined)
   const [isLoading, setIsLoading] = useState(false)
   const [tx, setTx] = useState<TransactionState>({ pending: false, label: '' })
+  // Surfaces an indexer failure to the Activity screen instead of letting an
+  // empty list read as "you have no activity".
+  const [activityError, setActivityError] = useState<string | undefined>()
 
   const connectedWallet = wagmiAddress as Address | undefined
   const account = connectedWallet ?? (appConfig.isMockMode ? mockUser : undefined)
@@ -865,8 +881,9 @@ export function useSocialTrust() {
     try {
       const graphState = await readGraphState(user)
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
+      setActivityError(undefined)
       const [friendProfiles, friendRepPairs] = await Promise.all([
-        readSocialProfiles(graphState.friends),
+        readSocialProfiles(profileTargets(graphState)),
         Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
       ])
       const friendRepScores = Object.fromEntries(friendRepPairs)
@@ -880,6 +897,9 @@ export function useSocialTrust() {
       return graphState
     } catch (error) {
       console.warn('The Graph state refresh failed.', error)
+      if (accountRef.current && sameAddress(accountRef.current, user)) {
+        setActivityError(error instanceof Error ? error.message : 'The indexed activity query failed.')
+      }
       return undefined
     }
   }, [readContract, readGraphState, readSocialProfiles])
@@ -912,8 +932,12 @@ export function useSocialTrust() {
     snapshotLoadSeqRef.current = requestId
     const previousSnapshot = snapshotRef.current
 
-    const graphStatePromise = readGraphState(user).catch((error) => {
+    const graphStatePromise = readGraphState(user).then((state) => {
+      setActivityError(undefined)
+      return state
+    }).catch((error) => {
       console.warn('The Graph account state query failed; preserving the last indexed lists.', error)
+      setActivityError(error instanceof Error ? error.message : 'The indexed activity query failed.')
       return {
         challenges: previousSnapshot?.challenges ?? [],
         friends: previousSnapshot?.friends ?? [],
@@ -973,7 +997,7 @@ export function useSocialTrust() {
 
     void Promise.all([
       readSocialProfile(user),
-      readSocialProfiles(graphState.friends),
+      readSocialProfiles(profileTargets(graphState)),
       Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
     ]).then(([socialProfile, friendProfiles, friendRepPairs]) => {
       if (snapshotLoadSeqRef.current !== requestId) return
@@ -1577,6 +1601,7 @@ export function useSocialTrust() {
     wrongNetwork,
     config,
     snapshot,
+    activityError,
     tx,
     connect,
     disconnect,

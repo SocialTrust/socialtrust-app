@@ -70,9 +70,9 @@ export function ProfileEditSheet({ open, loadProfile, onClose, onSave }: Profile
       description="Update the public details shown on your account and friend rows."
       onClose={close}
     >
-      {loading ? <p>loading profile...</p> : null}
+      {loading ? <p className="emptyNote">loading profile...</p> : null}
       {loadError ? (
-        <div className="emptyState errorBox">
+        <div className="emptyPanel emptyPanelError">
           <p>Could not load your profile. Try again.</p>
           <button className="secondaryButton" type="button" onClick={() => void load()}>Retry</button>
         </div>
