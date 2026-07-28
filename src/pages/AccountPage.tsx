@@ -190,8 +190,9 @@ export function AccountPage({
       <section className="section">
         <h3 className="sectionTitle">Account</h3>
         <div className="listGroup">
+          {/* Network lives in Funds, where it can also show the wrong-network
+              state and offer the switch. One row is enough. */}
           <ListRow title="Connected wallet" value={shortAddress(account, 6)} trailing={null} />
-          <ListRow title="Network" value={appConfig.chainName} trailing={null} />
           <ListRow
             leading={<span className="rowIcon"><FileText size={16} aria-hidden="true" /></span>}
             title="Protocol terms"

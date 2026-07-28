@@ -4,7 +4,7 @@ import jsQR from 'jsqr'
 import { QRCodeSVG } from 'qrcode.react'
 import type { Address } from 'viem'
 import type { ContractConfig, SocialProfile, UserSnapshot } from '../types'
-import { copyText, formatUsdc, isAddressLike, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
+import { copyText, formatUsdc, formatUsdcOrDash, isAddressLike, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
 import { Sheet } from './Sheet'
 import { ProfileAvatar, displayNameFor } from './ProfileAvatar'
 
@@ -145,6 +145,9 @@ export function StartFriendshipSheet({
   const appBalance = snapshot?.appBalance ?? 0n
   const missingStake = stake > appBalance ? stake - appBalance : 0n
   const hasEnough = Boolean(snapshot && appBalance >= stake)
+  // Without the on-chain stake there is no correct deposit amount to compute,
+  // so the action waits rather than submitting against a zero placeholder.
+  const termsLoading = !config
   const otherValid = useMemo(() => isAddressLike(other) && !sameAddress(other, account), [other, account])
   const isSelf = useMemo(() => isAddressLike(other) && sameAddress(other, account), [other, account])
 
@@ -169,7 +172,7 @@ export function StartFriendshipSheet({
   }, [open, other, otherValid, readSocialProfile])
 
   const submit = async () => {
-    if (submitting || !otherValid) return
+    if (submitting || !otherValid || termsLoading) return
     setSubmitting(true)
     try {
       const success = hasEnough
@@ -202,10 +205,10 @@ export function StartFriendshipSheet({
         </span>
       </div>
       <dl className="factList">
-        <div><dt>Stake required</dt><dd>{formatUsdc(stake)} USDC</dd></div>
-        <div><dt>Challenge length</dt><dd>{secondsToLabel(config?.challengeDuration)}</dd></div>
+        <div><dt>Stake required</dt><dd>{termsLoading ? formatUsdcOrDash(undefined) : `${formatUsdc(stake)} USDC`}</dd></div>
+        <div><dt>Challenge length</dt><dd>{secondsToLabelOrDash(config?.challengeDuration)}</dd></div>
         <div><dt>Your app balance</dt><dd>{formatUsdc(appBalance)} USDC</dd></div>
-        {hasEnough ? null : (
+        {hasEnough || termsLoading ? null : (
           <div><dt>Deposit needed</dt><dd>{formatUsdc(missingStake)} USDC from your wallet</dd></div>
         )}
       </dl>
@@ -229,13 +232,19 @@ export function StartFriendshipSheet({
 
   const footer = isConnected ? (
     <>
-      <button className="primaryButton full" type="button" disabled={!otherValid || submitting} onClick={submit}>
-        {submitting ? 'Confirming…' : hasEnough ? `Stake ${formatUsdc(stake)} USDC` : `Deposit ${formatUsdc(missingStake)} USDC & stake`}
+      <button className="primaryButton full" type="button" disabled={!otherValid || submitting || termsLoading} onClick={submit}>
+        {submitting
+          ? 'Confirming…'
+          : termsLoading
+            ? 'Loading terms…'
+            : hasEnough ? `Stake ${formatUsdc(stake)} USDC` : `Deposit ${formatUsdc(missingStake)} USDC & stake`}
       </button>
       <p className="footerCaption">
-        {hasEnough
-          ? `${secondsToLabel(config?.challengeDuration)} challenge · app balance ${formatUsdc(appBalance)} USDC`
-          : `Deposits ${formatUsdc(missingStake)} USDC from your wallet to cover the stake.`}
+        {termsLoading
+          ? 'Reading the current stake and challenge length from the contract.'
+          : hasEnough
+            ? `${secondsToLabelOrDash(config?.challengeDuration)} challenge · app balance ${formatUsdc(appBalance)} USDC`
+            : `Deposits ${formatUsdc(missingStake)} USDC from your wallet to cover the stake.`}
       </p>
     </>
   ) : null

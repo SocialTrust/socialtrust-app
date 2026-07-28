@@ -2,8 +2,8 @@ import { useState } from 'react'
 import type { Address } from 'viem'
 import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import type { ProfileFormValues } from '../components/ProfileEditSheet'
-import { challengeSortScore, getChallengeState } from '../lib/challenges'
-import { countdownUntil, formatUsdc, relativeTime, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
+import { challengeSortScore, isAttentionState, getChallengeState } from '../lib/challenges'
+import { countdownUntil, durationLabelOrDash, formatUsdc, formatUsdcOrDash, relativeTime, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
 import { ChallengeRow } from '../components/ChallengeRow'
 import { ProfileAvatar, displayNameFor } from '../components/ProfileAvatar'
 
@@ -135,7 +135,9 @@ function MatchmakingHero({
   const matchFee = config?.matchFee ?? 0n
   const hasEnoughBalance = appBalance >= matchFee
   const shortfall = matchFee > appBalance ? matchFee - appBalance : 0n
-  const days = config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'
+  // Natural wording straight from the on-chain window: a ten-minute window
+  // must not round up to a day.
+  const matchWindow = durationLabelOrDash(config?.matchTimeLimit)
 
   // Matching reaches people over Telegram, so entering the queue is gated on a
   // handle being stored on chain. The profiles contract is the only authority
@@ -196,7 +198,10 @@ function MatchmakingHero({
   if (profileError) caption = profileError
   else if (savedHandle && !gateOpen) caption = `Saved @${savedHandle} — you're ready to match`
   else if (gateOpen) caption = null
-  else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${days}`
+  // Config still loading: hold the line's space with placeholders instead of
+  // printing a fee and window of zero.
+  else if (!config) caption = `${formatUsdcOrDash(undefined)} USDC fee · ${matchWindow}`
+  else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${matchWindow}`
   else caption = `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`
 
   return (
@@ -289,7 +294,9 @@ export function HomePage({
   nowSeconds,
 }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
-  const attention = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
+  // Only states that actually need the user: an active-safe challenge is
+  // progressing normally and lives under Friends -> In progress.
+  const attention = challenges.filter((challenge) => isAttentionState(getChallengeState(challenge, nowSeconds)))
 
   if (!isConnected) {
     return (
@@ -304,10 +311,10 @@ export function HomePage({
         <section className="section">
           <h3 className="sectionTitle">Current parameters</h3>
           <dl className="factList">
-            <div><dt>Stake</dt><dd>{formatUsdc(config?.stakeAmt)} USDC</dd></div>
-            <div><dt>Duration</dt><dd>{secondsToLabel(config?.challengeDuration)}</dd></div>
-            <div><dt>Steal opens</dt><dd>after {secondsToLabel(config?.stealGracePeriod)}</dd></div>
-            <div><dt>Steal bounty</dt><dd>{formatUsdc(config?.stealBounty)} USDC</dd></div>
+            <div><dt>Stake</dt><dd>{config ? `${formatUsdc(config.stakeAmt)} USDC` : formatUsdcOrDash(undefined)}</dd></div>
+            <div><dt>Duration</dt><dd>{secondsToLabelOrDash(config?.challengeDuration)}</dd></div>
+            <div><dt>Steal opens</dt><dd>{config ? `after ${secondsToLabelOrDash(config.stealGracePeriod)}` : secondsToLabelOrDash(undefined)}</dd></div>
+            <div><dt>Steal bounty</dt><dd>{config ? `${formatUsdc(config.stealBounty)} USDC` : formatUsdcOrDash(undefined)}</dd></div>
           </dl>
         </section>
 

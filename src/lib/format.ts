@@ -43,6 +43,50 @@ export function secondsToLabel(seconds?: bigint | number, opts?: { raw?: boolean
   return `${secs}s`
 }
 
+/** Shown wherever a value has not loaded yet. Never used for a real zero. */
+export const NOT_LOADED = '—'
+
+function plural(count: number, unit: string) {
+  return `${count} ${unit}${count === 1 ? '' : 's'}`
+}
+
+/**
+ * Natural-language duration for prose captions ("10 minutes", "1 day",
+ * "14 days"). The largest unit leads and a second unit is appended only when
+ * it is non-zero, so a sub-day window is never rounded up to "1 days".
+ * secondsToLabel stays the compact form used inside dense rows.
+ */
+export function durationLabel(seconds?: bigint | number) {
+  const total = Math.max(0, Math.floor(Number(seconds ?? 0)))
+
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const mins = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+
+  if (days > 0) return hours > 0 ? `${plural(days, 'day')} ${plural(hours, 'hour')}` : plural(days, 'day')
+  if (hours > 0) return mins > 0 ? `${plural(hours, 'hour')} ${plural(mins, 'minute')}` : plural(hours, 'hour')
+  if (mins > 0) return secs > 0 ? `${plural(mins, 'minute')} ${plural(secs, 'second')}` : plural(mins, 'minute')
+  return plural(secs, 'second')
+}
+
+/**
+ * Contract configuration that has not been read yet is unknown, not zero.
+ * These render the placeholder for `undefined` while still printing a genuine
+ * on-chain `0n` as zero.
+ */
+export function formatUsdcOrDash(value?: bigint, opts?: { compact?: boolean; truncate?: boolean }) {
+  return value === undefined ? NOT_LOADED : formatUsdc(value, opts)
+}
+
+export function secondsToLabelOrDash(seconds?: bigint | number) {
+  return seconds === undefined ? NOT_LOADED : secondsToLabel(seconds)
+}
+
+export function durationLabelOrDash(seconds?: bigint | number) {
+  return seconds === undefined ? NOT_LOADED : durationLabel(seconds)
+}
+
 export function countdownUntil(ts?: bigint, nowSeconds = Math.floor(Date.now() / 1000)) {
   if (!ts || ts === 0n) return '—'
   return secondsToLabel(Number(ts) - nowSeconds)

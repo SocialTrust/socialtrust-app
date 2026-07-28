@@ -100,6 +100,17 @@ describe('AccountPage (self control centre)', () => {
     expect(screen.queryByText('USDC allowance')).toBeNull()
   })
 
+  it('shows the network exactly once, in the section that can act on it', () => {
+    setup()
+    // Funds owns Network because that row carries the wrong-network state and
+    // the switch action; the Account section must not repeat it.
+    expect(screen.getAllByText('Network')).toHaveLength(1)
+    const accountSection = screen.getByText('Account', { selector: '.sectionTitle' }).closest('section')!
+    expect(accountSection.textContent).not.toContain('Network')
+    expect(accountSection.textContent).toContain('Connected wallet')
+    expect(accountSection.textContent).toContain('Protocol terms')
+  })
+
   it('shows admin controls only for the contract owner', async () => {
     const { onOpenAdmin } = setup({ isOwner: true })
     await userEvent.click(screen.getByRole('button', { name: /Admin controls/ }))

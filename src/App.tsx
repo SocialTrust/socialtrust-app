@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Address } from 'viem'
 import { ArrowLeft, Pencil, Plus, RefreshCw } from 'lucide-react'
-import { formatUsdc } from './lib/format'
+import { NOT_LOADED, formatUsdc, formatUsdcOrDash } from './lib/format'
 import { parseRoute, tabForRoute } from './lib/routes'
 import { appConfig } from './lib/config'
 import type { ChallengeView } from './types'
@@ -125,15 +125,21 @@ function App() {
 
   const sheetOpen = startOpen || walletOpen || adminOpen || profileEditOpen || qrOpen || termsOpen || Boolean(selectedChallenge)
 
+  // Stacked, label-free metrics: balance above reputation. Both read as the
+  // placeholder until the snapshot lands — an unread balance is unknown, not
+  // zero — while a genuine 0 balance still prints as 0.00.
+  const balanceText = formatUsdcOrDash(snapshot?.appBalance, { truncate: true })
+  const repText = snapshot ? String(snapshot.repScore) : NOT_LOADED
+
   const connectedHeaderMetrics = isConnected && account ? (
     <div className="topBarMetrics">
-      <span className="metric" aria-label={`App balance ${formatUsdc(snapshot?.appBalance, { truncate: true })} USDC`}>
+      <span className="metric" aria-label={`App balance ${balanceText} USDC`}>
         <span className="metricSymbol metricSymbolUsdc" aria-hidden="true">$</span>
-        {formatUsdc(snapshot?.appBalance, { truncate: true })}
+        <span className="metricValue">{balanceText}</span>
       </span>
-      <span className="metric" aria-label={`Reputation ${String(snapshot?.repScore ?? 0n)}`}>
-        <span className="metricSymbol metricSymbolRep" aria-hidden="true">{'★︎'}</span>
-        {String(snapshot?.repScore ?? 0n)}
+      <span className="metric" aria-label={`Reputation ${repText}`}>
+        <span className="metricSymbol metricSymbolRep" aria-hidden="true">★</span>
+        <span className="metricValue">{repText}</span>
       </span>
     </div>
   ) : null

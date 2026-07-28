@@ -42,7 +42,11 @@
   --shell: 560px;
   --gutter: 16px;
   --nav-height: 58px;
+  /* Interactive height of the top bar, excluding the status-bar inset. */
   --bar-height: 54px;
+  /* Full sticky height: the bar owns the top inset, so anything that sticks
+     beneath it (the wrong-network banner) offsets by this instead. */
+  --bar-total: calc(54px + env(safe-area-inset-top));
 }
 
 * { box-sizing: border-box; }
@@ -60,8 +64,9 @@ body {
   color: var(--ink);
   font-size: 16px;
   line-height: 1.45;
-  /* Standalone PWA: the layout runs edge to edge and pays back the insets. */
-  padding-top: env(safe-area-inset-top);
+  /* Standalone PWA: the layout runs edge to edge. The top inset is paid by the
+     sticky top bar itself (see .topBar) so it is never counted twice, and the
+     bottom inset by the fixed nav. */
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
   overscroll-behavior-y: none;
@@ -127,6 +132,9 @@ a { color: inherit; }
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
+  /* The bar's background covers the status bar; its content starts below it.
+     On a device with no inset this resolves to 0 and nothing changes. */
+  padding-top: env(safe-area-inset-top);
 }
 
 .topBarInner {
@@ -177,29 +185,40 @@ a { color: inherit; }
   border-radius: 999px;
 }
 
+/* Two compact stacked lines: balance over reputation. A grid keeps the symbol
+   column fixed so both values align regardless of digit count. */
 .topBarMetrics {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 12px auto;
+  justify-content: end;
+  gap: 1px 5px;
   font-variant-numeric: tabular-nums;
+  min-width: 0;
 }
 
 .metric {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.92rem;
-  font-weight: 800;
+  /* Each metric spans the shared columns, so the two symbols and the two
+     values line up whatever the digit count. Browsers without subgrid drop
+     the declaration and fall back to a still-legible auto grid. */
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.25;
   white-space: nowrap;
 }
 
-.metricSymbol { font-weight: 900; }
+.metricValue { font-weight: 650; text-align: right; }
+.metricSymbol { font-weight: 800; text-align: center; }
 .metricSymbolUsdc { color: var(--usdc); }
-.metricSymbolRep { color: var(--purple); }
+.metricSymbolRep { color: var(--purple); font-size: 0.8rem; }
 
 .networkBanner {
   position: sticky;
-  top: var(--bar-height);
+  top: var(--bar-total);
   z-index: 29;
   display: flex;
   flex-wrap: wrap;

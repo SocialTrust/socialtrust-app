@@ -335,6 +335,37 @@ describe('Account and public profile data isolation', () => {
   })
 })
 
+describe('Home header metrics', () => {
+  it('stacks balance over reputation with accessible labels and no visible field names', async () => {
+    await renderApp()
+    const balance = await screen.findByLabelText('App balance 50.00 USDC')
+    const reputation = screen.getByLabelText('Reputation 82')
+
+    // Same stacked container, balance first.
+    expect(balance.parentElement).toBe(reputation.parentElement)
+    expect(balance.compareDocumentPosition(reputation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The labels are for assistive tech only; the header shows symbols.
+    expect(balance.textContent).toBe('$50.00')
+    expect(reputation.textContent).toBe('★82')
+  })
+
+  it('shows placeholders, not zeros, while the account snapshot is still loading', async () => {
+    // A balance read that never settles keeps the snapshot undefined.
+    readContract.mockImplementation(async (params: ReadCall) => {
+      if (params.functionName === 'balances') return new Promise(() => {})
+      if (params.address === profilesAddress) return profileFor(String(params.args?.[0] ?? ''))
+      if (params.functionName === 'owner') return friend
+      return 0n
+    })
+
+    await renderApp()
+
+    expect(await screen.findByLabelText('App balance — USDC')).toBeTruthy()
+    expect(screen.getByLabelText('Reputation —')).toBeTruthy()
+    expect(screen.queryByLabelText(/App balance 0\.00 USDC/)).toBeNull()
+  })
+})
+
 describe('Needs attention', () => {
   it('surfaces an incoming invitation with its actions', async () => {
     await renderApp()
