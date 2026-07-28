@@ -100,9 +100,8 @@ Direct contract reads remain authoritative for:
 | Area | Change |
 | --- | --- |
 | `src/wagmi.ts` | Coinbase Smart Wallet listed first (passkey, no app install); grouped wallet lists (RainbowKit expects `[{ groupName, wallets }]`, not a flat array); WalletConnect app metadata added |
-| `src/lib/config.ts` | Single chain source of truth using viem's canonical `baseSepolia`; adds `appUrl`, `paymasterUrl`, `batchCalls` |
-| `src/lib/batch.ts` | New. EIP-5792 `wallet_sendCalls` helper: approve + stake in one confirmation, with automatic fallback for EOA wallets |
-| `src/hooks/useSocialTrust.ts` | Batched write path; `finishWrite` shared by both paths; chain-switch now polls instead of checking once after 500 ms |
+| `src/lib/config.ts` | Single chain source of truth using viem's canonical `baseSepolia`; adds `appUrl` and `paymasterUrl` |
+| `src/hooks/useSocialTrust.ts` | Sequential transaction flow; chain-switch now polls instead of checking once after 500 ms |
 | `index.html` | Installable PWA metadata, `viewport-fit=cover`, apple touch icons |
 | `public/` | `manifest.webmanifest`, `sw.js`, generated icon set |
 | `src/main.tsx` | Service worker registration (production only) |
@@ -115,7 +114,7 @@ First-time user, no wallet, mobile Safari:
 1. Taps invite link, taps **Stake for friendship**.
 2. RainbowKit sheet → **Coinbase Wallet** → popup → **Face ID** → passkey smart account created. No install, no seed phrase, no app switch.
 3. Needs USDC on Base (the remaining real onboarding wall).
-4. Taps stake → **one Face ID** → approve + stake execute atomically; the smart account deploys itself in the same bundle. With `VITE_PAYMASTER_URL` set, no ETH needed.
+4. Taps stake. If the USDC allowance is sufficient, the stake needs one wallet confirmation. If allowance is insufficient, the app requests an exact-amount USDC approval, waits for it to confirm, and then requests the stake transaction, for two consecutive wallet confirmations from the original app action. With `VITE_PAYMASTER_URL` set, sponsored smart-account transactions may not require ETH.
 
 Returning user: silent reconnect, allowance already set, one Face ID, done.
 
