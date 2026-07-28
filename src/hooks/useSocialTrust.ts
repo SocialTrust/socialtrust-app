@@ -5,10 +5,11 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi'
 import { socialTrustAbi, erc20Abi } from '../contracts/socialTrustAbi'
 import { socialTrustProfilesAbi } from '../contracts/socialTrustProfilesAbi'
-import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
+import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchSnapshot, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
 import { appConfig, configuredChain } from '../lib/config'
 import { isAddressLike, parseUsdc, sameAddress, ZERO_ADDRESS } from '../lib/format'
 import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
+import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
 
 const publicClient = createPublicClient({
   chain: configuredChain,
@@ -245,72 +246,14 @@ type GraphActivity = {
   transactionHash: `0x${string}`
 }
 
-type GraphMatchQueueEntry = {
-  user: Address
-  feeAmount: string
-  cancelFeeAmount: string
-  queuedAt: string
-  status: string
-  refundAmount?: string | null
-  matchId?: string | null
-}
-
-type GraphMatch = {
-  id: string
-  matchId: string
-  user0: Address
-  user1: Address
-  feeAmount0: string
-  feeAmount1: string
-  matchedAt: string
-  deadline: string
-  status: string
-  resolvedAt?: string | null
-  feeRefund0?: string | null
-  feeRefund1?: string | null
-  amountToTreasury?: string | null
-}
-
-type GraphUserMatchState = {
-  currentQueueEntry?: GraphMatchQueueEntry | null
-  activeMatch?: GraphMatch | null
-}
-
 type GraphAccountData = {
   challengeParticipants: GraphChallengeParticipant[]
   friendships: GraphFriendship[]
   activities: GraphActivity[]
-  users: GraphUserMatchState[]
 }
 
 const ACCOUNT_DATA_QUERY = `
   query AccountData($user: Bytes!) {
-    users(where: { id: $user }, first: 1) {
-      currentQueueEntry {
-        user
-        feeAmount
-        cancelFeeAmount
-        queuedAt
-        status
-        refundAmount
-        matchId
-      }
-      activeMatch {
-        id
-        matchId
-        user0
-        user1
-        feeAmount0
-        feeAmount1
-        matchedAt
-        deadline
-        status
-        resolvedAt
-        feeRefund0
-        feeRefund1
-        amountToTreasury
-      }
-    }
     challengeParticipants(
       where: { account: $user }
       first: 100
@@ -380,7 +323,7 @@ const ACCOUNT_DATA_QUERY = `
 
 async function readGraphAccountData(user: Address): Promise<GraphAccountData> {
   if (!appConfig.graphEnabled || !appConfig.graphUrl) {
-    return { challengeParticipants: [], friendships: [], activities: [], users: [] }
+    return { challengeParticipants: [], friendships: [], activities: [] }
   }
 
   const response = await fetch(appConfig.graphUrl, {
@@ -409,7 +352,6 @@ async function readGraphAccountData(user: Address): Promise<GraphAccountData> {
     challengeParticipants: payload.data?.challengeParticipants ?? [],
     friendships: payload.data?.friendships ?? [],
     activities: payload.data?.activities ?? [],
-    users: payload.data?.users ?? [],
   }
 }
 
@@ -466,6 +408,7 @@ export function useSocialTrust() {
   const [snapshot, setSnapshot] = useState<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
   const snapshotRef = useRef<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
   const snapshotLoadSeqRef = useRef(0)
+  const matchSnapshotRef = useRef<AccountMatchSnapshot | undefined>(undefined)
   const [config, setConfig] = useState<ContractConfig | undefined>(appConfig.isMockMode ? mockConfig : undefined)
   const [isLoading, setIsLoading] = useState(false)
   const [tx, setTx] = useState<TransactionState>({ pending: false, label: '' })
@@ -473,13 +416,17 @@ export function useSocialTrust() {
   const connectedWallet = wagmiAddress as Address | undefined
   const account = connectedWallet ?? (appConfig.isMockMode ? mockUser : undefined)
   const accountRef = useRef<Address | undefined>(account)
+  // Update during render, rather than waiting for an effect, so a promise that
+  // settles in the account-switch commit window already sees the new identity.
+  accountRef.current = account
   const graphPollSeqRef = useRef(0)
   const isConnected = wagmiIsConnected || appConfig.isMockMode
   const isOwner = Boolean(account && config?.owner && sameAddress(account, config.owner))
   const wrongNetwork = Boolean(!appConfig.isMockMode && isConnected && typeof chainId === 'number' && chainId !== appConfig.chainId)
 
   useEffect(() => {
-    accountRef.current = account
+    matchSnapshotRef.current = undefined
+    graphPollSeqRef.current += 1
   }, [account])
 
   useEffect(() => {
@@ -649,37 +596,7 @@ export function useSocialTrust() {
     }, [])
 
     const recentActivity = data.activities.map(graphActivityToItem)
-    const graphUser = data.users[0]
-    const queue = graphUser?.currentQueueEntry
-    const match = graphUser?.activeMatch
-
-    const currentQueueEntry: MatchQueueState | undefined = queue && queue.status === 'QUEUED' ? {
-      user: queue.user,
-      feeAmount: BigInt(queue.feeAmount || '0'),
-      cancelFeeAmount: BigInt(queue.cancelFeeAmount || '0'),
-      queuedAt: BigInt(queue.queuedAt || '0'),
-      status: queue.status,
-      refundAmount: queue.refundAmount == null ? undefined : BigInt(queue.refundAmount),
-      matchId: queue.matchId == null ? undefined : BigInt(queue.matchId),
-    } : undefined
-
-    const activeMatch: MatchState | undefined = match && match.status === 'ACTIVE' ? {
-      id: match.id,
-      matchId: BigInt(match.matchId || '0'),
-      user0: match.user0,
-      user1: match.user1,
-      feeAmount0: BigInt(match.feeAmount0 || '0'),
-      feeAmount1: BigInt(match.feeAmount1 || '0'),
-      matchedAt: BigInt(match.matchedAt || '0'),
-      deadline: BigInt(match.deadline || '0'),
-      status: match.status,
-      resolvedAt: match.resolvedAt == null ? undefined : BigInt(match.resolvedAt),
-      feeRefund0: match.feeRefund0 == null ? undefined : BigInt(match.feeRefund0),
-      feeRefund1: match.feeRefund1 == null ? undefined : BigInt(match.feeRefund1),
-      amountToTreasury: match.amountToTreasury == null ? undefined : BigInt(match.amountToTreasury),
-    } : undefined
-
-    return { challenges, friends, recentActivity, currentQueueEntry, activeMatch }
+    return { challenges, friends, recentActivity }
   }, [normalizeGraphChallenge])
 
   const readGraphState = useCallback(async (user: Address) => {
@@ -715,7 +632,7 @@ export function useSocialTrust() {
     }
   }, [])
 
-  const readSocialProfile = useCallback(async (user: Address): Promise<SocialProfile> => {
+  const readSocialProfile = useCallback(async (user: Address, blockNumber?: bigint): Promise<SocialProfile> => {
     if (appConfig.isMockMode) {
       return user.toLowerCase() === mockUser.toLowerCase()
         ? { displayName: 'Jamie', xUsername: 'jamie_judd', telegramUsername: 'jamiejudd', discordUsername: '', imgUrl: '', exists: true }
@@ -729,6 +646,7 @@ export function useSocialTrust() {
         abi: socialTrustProfilesAbi,
         functionName: 'getProfile',
         args: [user],
+        ...(blockNumber !== undefined ? { blockNumber } : {}),
       })
       return normalizeSocialProfile(result)
     } catch {
@@ -906,112 +824,94 @@ export function useSocialTrust() {
     }
   }, [readContract, toBigIntValue])
 
-  const readMatchStateOnChain = useCallback(async (user: Address, blockNumber?: bigint) => {
+  const readMatchStateOnChain = useCallback(async (user: Address, requestedBlock?: bigint): Promise<MatchSnapshot> => {
+    const blockNumber = requestedBlock ?? await publicClient.getBlockNumber()
     const [currentQueueEntry, activeMatch] = await Promise.all([
       readMatchQueueEntryOnChain(user, blockNumber),
       readActiveMatchOnChain(user, blockNumber),
     ])
-    return { currentQueueEntry, activeMatch }
-  }, [readActiveMatchOnChain, readMatchQueueEntryOnChain])
-
-  const refreshMatchStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
-    const { currentQueueEntry, activeMatch } = await readMatchStateOnChain(user, blockNumber)
-    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
-
     const partner = activeMatch
       ? (sameAddress(activeMatch.user0, user) ? activeMatch.user1 : activeMatch.user0)
       : undefined
-    const matchPartnerProfile = partner ? await readSocialProfile(partner).catch(() => undefined) : undefined
-    if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+    const matchPartnerProfile = partner
+      ? await readSocialProfile(partner, blockNumber).catch(() => undefined)
+      : undefined
+    return { blockNumber, currentQueueEntry, activeMatch, matchPartnerProfile }
+  }, [readActiveMatchOnChain, readMatchQueueEntryOnChain, readSocialProfile])
 
-    const current = snapshotRef.current
-    if (!current) return
-    const updated = {
-      ...current,
-      currentQueueEntry,
-      activeMatch,
-      matchPartnerProfile: partner ? matchPartnerProfile : undefined,
+  const applyMatchSnapshot = useCallback((user: Address, next: MatchSnapshot) => {
+    const accepted = acceptMatchSnapshot(matchSnapshotRef.current, { ...next, account: user }, accountRef.current)
+    if (!accepted || accepted === matchSnapshotRef.current) return false
+    matchSnapshotRef.current = accepted
+    const currentSnapshot = snapshotRef.current
+    if (currentSnapshot) {
+      snapshotRef.current = {
+        ...currentSnapshot,
+        currentQueueEntry: accepted.currentQueueEntry,
+        activeMatch: accepted.activeMatch,
+        matchPartnerProfile: accepted.matchPartnerProfile,
+      }
     }
-    snapshotRef.current = updated
-    setSnapshot(updated)
-  }, [readMatchStateOnChain, readSocialProfile])
+    setSnapshot((current) => {
+      if (!current || !accountRef.current || !sameAddress(accountRef.current, user)) return current
+      const updated = {
+        ...current,
+        currentQueueEntry: accepted.currentQueueEntry,
+        activeMatch: accepted.activeMatch,
+        matchPartnerProfile: accepted.matchPartnerProfile,
+      }
+      // Merge against React's current value, but the ref was already updated
+      // synchronously above so unrelated targeted refreshes cannot clobber it.
+      snapshotRef.current = updated
+      return updated
+    })
+    return true
+  }, [])
 
-  // matchBlockNumber pins the on-chain queue/match reads to a known block —
-  // normally the confirmed receipt block of the write that triggered this
-  // refresh. Without it these reads use "latest", and because the subgraph can
-  // run ahead of a given RPC node's latest height, a post-write refresh could
-  // read pre-transaction match state and clobber the freshly confirmed value,
-  // flipping the hero back to its old state until a manual refresh.
-  const refreshGraphStateOnly = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
+  const refreshMatchStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const next = await readMatchStateOnChain(user, blockNumber)
+    applyMatchSnapshot(user, next)
+    return next
+  }, [applyMatchSnapshot, readMatchStateOnChain])
+
+  const refreshGraphStateOnly = useCallback(async (user: Address) => {
     try {
-      const [graphState, matchState] = await Promise.all([
-        readGraphState(user),
-        readMatchStateOnChain(user, matchBlockNumber),
-      ])
+      const graphState = await readGraphState(user)
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
-
-      const matchPartner = matchState.activeMatch
-        ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
-        : undefined
-      const [friendProfiles, friendRepPairs, matchPartnerProfile] = await Promise.all([
+      const [friendProfiles, friendRepPairs] = await Promise.all([
         readSocialProfiles(graphState.friends),
         Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
-        matchPartner ? readSocialProfile(matchPartner) : Promise.resolve(undefined),
       ])
       const friendRepScores = Object.fromEntries(friendRepPairs)
-
       setSnapshot((current) => {
-        if (!current) return current
-        const updated = {
-          ...current,
-          friendCount: BigInt(graphState.friends.length),
-          friends: graphState.friends,
-          challenges: graphState.challenges,
-          recentActivity: graphState.recentActivity,
-          currentQueueEntry: matchState.currentQueueEntry,
-          activeMatch: matchState.activeMatch,
-          matchPartnerProfile: matchPartner ? matchPartnerProfile : undefined,
-          friendProfiles,
-          friendRepScores,
-        }
+        if (!current || !accountRef.current || !sameAddress(accountRef.current, user)) return current
+        const updated = { ...current, friendCount: BigInt(graphState.friends.length), friends: graphState.friends,
+          challenges: graphState.challenges, recentActivity: graphState.recentActivity, friendProfiles, friendRepScores }
         snapshotRef.current = updated
         return updated
       })
-
       return graphState
     } catch (error) {
       console.warn('The Graph state refresh failed.', error)
       return undefined
     }
-  }, [readContract, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
+  }, [readContract, readGraphState, readSocialProfiles])
 
-  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`, matchBlockNumber?: bigint) => {
-    const pollId = graphPollSeqRef.current + 1
-    graphPollSeqRef.current = pollId
-
+  const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`) => {
+    const pollId = ++graphPollSeqRef.current
     for (let attempt = 0; attempt < 8; attempt += 1) {
       if (graphPollSeqRef.current !== pollId) return
       if (attempt > 0) await sleep(1250)
       if (graphPollSeqRef.current !== pollId) return
-
       try {
         const graphState = await readGraphState(user)
-        const indexed = graphState.recentActivity.some((activity) =>
-          Boolean(activity.txHash && activity.txHash.toLowerCase() === hash.toLowerCase())
-        )
-
-        if (indexed) {
-          await refreshGraphStateOnly(user, matchBlockNumber)
+        if (graphState.recentActivity.some((activity) => activity.txHash?.toLowerCase() === hash.toLowerCase())) {
+          await refreshGraphStateOnly(user)
           return
         }
-      } catch (error) {
-        console.warn('The Graph transaction poll failed.', error)
-      }
+      } catch (error) { console.warn('The Graph transaction poll failed.', error) }
     }
-
-    if (graphPollSeqRef.current === pollId) {
-      await refreshGraphStateOnly(user, matchBlockNumber)
-    }
+    if (graphPollSeqRef.current === pollId) await refreshGraphStateOnly(user)
   }, [readGraphState, refreshGraphStateOnly])
 
   const loadSnapshot = useCallback(async (user: Address, _options: { refreshActivity?: boolean } = {}) => {
@@ -1031,8 +931,6 @@ export function useSocialTrust() {
         challenges: previousSnapshot?.challenges ?? [],
         friends: previousSnapshot?.friends ?? [],
         recentActivity: previousSnapshot?.recentActivity ?? [],
-        currentQueueEntry: previousSnapshot?.currentQueueEntry,
-        activeMatch: previousSnapshot?.activeMatch,
       }
     })
 
@@ -1056,7 +954,7 @@ export function useSocialTrust() {
       appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? Promise.resolve(0n) : readErc20<bigint>('allowance', [user, appConfig.contractAddress]),
       readMatchStateOnChain(user).catch((error) => {
         console.warn('On-chain match state read failed; preserving the last known match state.', error)
-        return { currentQueueEntry: previousSnapshot?.currentQueueEntry, activeMatch: previousSnapshot?.activeMatch }
+        return undefined
       }),
       graphStatePromise,
     ])
@@ -1072,32 +970,30 @@ export function useSocialTrust() {
       friends: graphState.friends,
       challenges: graphState.challenges,
       recentActivity: graphState.recentActivity,
-      currentQueueEntry: matchState.currentQueueEntry,
-      activeMatch: matchState.activeMatch,
+      currentQueueEntry: matchSnapshotRef.current?.account && sameAddress(matchSnapshotRef.current.account, user) ? matchSnapshotRef.current.currentQueueEntry : undefined,
+      activeMatch: matchSnapshotRef.current?.account && sameAddress(matchSnapshotRef.current.account, user) ? matchSnapshotRef.current.activeMatch : undefined,
+      matchPartnerProfile: matchSnapshotRef.current?.account && sameAddress(matchSnapshotRef.current.account, user) ? matchSnapshotRef.current.matchPartnerProfile : undefined,
       owner,
       socialProfile: previousSnapshot?.socialProfile,
       friendProfiles: previousSnapshot?.friendProfiles,
       friendRepScores: previousSnapshot?.friendRepScores,
     }
 
+    if (snapshotLoadSeqRef.current !== requestId || !accountRef.current || !sameAddress(accountRef.current, user)) return nextSnapshot
     snapshotRef.current = nextSnapshot
     setSnapshot(nextSnapshot)
-
-    const matchPartner = matchState.activeMatch
-      ? (sameAddress(matchState.activeMatch.user0, user) ? matchState.activeMatch.user1 : matchState.activeMatch.user0)
-      : undefined
+    if (matchState) applyMatchSnapshot(user, matchState)
 
     void Promise.all([
       readSocialProfile(user),
       readSocialProfiles(graphState.friends),
       Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
-      matchPartner ? readSocialProfile(matchPartner) : Promise.resolve(undefined),
-    ]).then(([socialProfile, friendProfiles, friendRepPairs, matchPartnerProfile]) => {
+    ]).then(([socialProfile, friendProfiles, friendRepPairs]) => {
       if (snapshotLoadSeqRef.current !== requestId) return
       const friendRepScores = Object.fromEntries(friendRepPairs)
       setSnapshot((current) => {
         const base = current ?? nextSnapshot
-        const updated = { ...base, socialProfile, friendProfiles, friendRepScores, matchPartnerProfile }
+        const updated = { ...base, socialProfile, friendProfiles, friendRepScores }
         snapshotRef.current = updated
         return updated
       })
@@ -1106,7 +1002,7 @@ export function useSocialTrust() {
     })
 
     return nextSnapshot
-  }, [readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
+  }, [applyMatchSnapshot, readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
 
   const refresh = useCallback(async () => {
     setIsLoading(true)
@@ -1124,6 +1020,17 @@ export function useSocialTrust() {
     refresh()
   }, [refresh])
 
+  // Another account can complete the match, so queued users follow Base's head.
+  // Recursive timeouts ensure slow RPC calls never overlap.
+  useEffect(() => {
+    if (!account || !snapshot?.currentQueueEntry || appConfig.isMockMode) return
+    const pollingAccount = account
+    return startMatchPolling({
+      shouldContinue: () => Boolean(accountRef.current && sameAddress(accountRef.current, pollingAccount) && matchSnapshotRef.current?.currentQueueEntry),
+      poll: async () => { await refreshMatchStateOnly(pollingAccount) },
+    })
+  }, [account, Boolean(snapshot?.currentQueueEntry), refreshMatchStateOnly])
+
   // Do not auto-request a network switch on route changes.
   // Mobile WalletConnect wallets can briefly report an unknown/wrong chain while pages remount,
   // which made normal navigation look like a failed transaction. Writes still call
@@ -1140,6 +1047,8 @@ export function useSocialTrust() {
 
   const disconnect = useCallback(() => {
     snapshotLoadSeqRef.current += 1
+    matchSnapshotRef.current = undefined
+    graphPollSeqRef.current += 1
     wagmiDisconnect()
     setSnapshot(appConfig.isMockMode ? mockSnapshot : undefined)
     snapshotRef.current = appConfig.isMockMode ? mockSnapshot : undefined
@@ -1321,18 +1230,16 @@ export function useSocialTrust() {
     }
   }, [refreshCoreStateOnly])
 
-  // Match-changing writes refresh balance and match state together. The two run
-  // sequentially per tick (not concurrently) because each does a non-atomic
-  // read-modify-write on the snapshot and would otherwise race. Match reads are
-  // pinned to the confirmed receipt block so a lagging RPC "latest" can never
-  // reintroduce pre-transaction queue/match state.
-  const retryBalanceAndMatchAfterWrite = useCallback(async (user: Address, matchBlockNumber?: bigint) => {
+  // Receipt pinning is deliberately one-shot. Every delayed retry reads a newly
+  // captured latest block after the selected RPC edge has caught up to the receipt.
+  const retryBalanceAndMatchAfterWrite = useCallback(async (user: Address, receiptBlock: bigint) => {
     for (const delayMs of [350, 1000, 2000]) {
       await sleep(delayMs)
       if (!accountRef.current || !sameAddress(accountRef.current, user)) return
       try {
+        while (await publicClient.getBlockNumber() < receiptBlock) await sleep(250)
         await refreshCoreStateOnly(user)
-        await refreshMatchStateOnly(user, matchBlockNumber)
+        await refreshMatchStateOnly(user)
       } catch (error) {
         console.warn(`Post-transaction balance/match refresh retry after ${delayMs}ms failed.`, error)
       }
@@ -1464,7 +1371,7 @@ export function useSocialTrust() {
             : refreshCoreStateOnly(writer).catch(() => undefined),
         refreshAfterWrite(action, args).catch(() => undefined),
       ])
-      if (graphTracked) await pollGraphForTransaction(writer, hash, matchChanging ? receipt.blockNumber : undefined)
+      if (graphTracked) await pollGraphForTransaction(writer, hash)
     })()
   }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
 

@@ -134,6 +134,14 @@ export type UserSnapshot = {
   matchPartnerProfile?: SocialProfile
 }
 
+/** A single-block, RPC-authoritative view of the connected user's matchmaking. */
+export type MatchSnapshot = {
+  blockNumber: bigint
+  currentQueueEntry?: MatchQueueState
+  activeMatch?: MatchState
+  matchPartnerProfile?: SocialProfile
+}
+
 export type AccountProfile = {
   address: Address
   friendCount: bigint
