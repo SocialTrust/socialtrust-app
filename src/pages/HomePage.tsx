@@ -17,7 +17,7 @@ type MatchmakingHeroProps = {
   onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
   readSocialProfile: (account: Address) => Promise<SocialProfile>
-  onStartWith: (address?: Address) => void
+  onStartWith: (address: Address) => void
   onOpenChallenge: (challenge: ChallengeView) => void
   onNavigateAccount: (address: Address) => void
   onSetProfile: (values: ProfileFormValues) => Promise<boolean | void>
@@ -49,14 +49,6 @@ export async function saveMatchmakingTelegramUsername(
     discordUsername: current.discordUsername,
     imgUrl: current.imgUrl,
   })
-}
-
-function InviteSomeoneAction({ onStartWith }: { onStartWith: (address?: Address) => void }) {
-  return (
-    <button className="quietTextAction" type="button" onClick={() => onStartWith(undefined)}>
-      Invite someone you know
-    </button>
-  )
 }
 
 function MatchmakingHero({
@@ -126,7 +118,6 @@ function MatchmakingHero({
         <p>Queued {relativeTime(queueEntry.queuedAt, nowSeconds)}. Your {formatUsdc(queueEntry.feeAmount)} USDC fee is locked while you wait.</p>
         <button className="secondaryButton full" type="button" disabled={txPending} onClick={onCancelMatch}>Cancel search</button>
         <span className="heroCaption">Cancelling refunds {formatUsdc(refund)} USDC</span>
-        <InviteSomeoneAction onStartWith={onStartWith} />
       </section>
     )
   }
@@ -243,7 +234,6 @@ function MatchmakingHero({
 
       {caption ? <span className={`heroCaption ${profileError ? 'heroCaptionError' : ''}`}>{caption}</span> : null}
 
-      <InviteSomeoneAction onStartWith={onStartWith} />
     </section>
   )
 }
@@ -255,7 +245,7 @@ type HomePageProps = {
   snapshot?: UserSnapshot
   isLoading: boolean
   onConnect: () => void
-  onStartWith: (address?: Address) => void
+  onStartWith: (address: Address) => void
   onFindMatch: () => void
   onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void

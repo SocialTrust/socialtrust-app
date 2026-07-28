@@ -180,7 +180,9 @@ export function AccountPage({
           <ListRow title="Discord" value={handleValue(profile?.discordUsername)} trailing={null} />
           <ListRow
             title="Profile image"
-            value={profile?.imgUrl?.trim() ? 'Set' : 'Default avatar'}
+            // The avatar already shows a custom image; "Set" beside it says
+            // nothing extra. Only the absence of one needs spelling out.
+            value={profile?.imgUrl?.trim() ? undefined : 'Not set'}
             trailing={<ProfileAvatar address={account} profile={profile} size="sm" />}
           />
         </div>

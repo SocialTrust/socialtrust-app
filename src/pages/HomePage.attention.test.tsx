@@ -71,7 +71,7 @@ const config = {
   totalBonusPaid: 0n,
 } satisfies ContractConfig
 
-function snapshotWith(challenges: ChallengeView[]): UserSnapshot {
+function snapshotWith(challenges: ChallengeView[], extra: Partial<UserSnapshot> = {}): UserSnapshot {
   return {
     walletUsdc: 0n,
     appBalance: 50_000_000n,
@@ -83,18 +83,24 @@ function snapshotWith(challenges: ChallengeView[]): UserSnapshot {
     friends: [],
     challenges,
     recentActivity: [],
+    ...extra,
   }
 }
 
 afterEach(cleanup)
 
-function renderHome(overrides: { config?: ContractConfig; challenges?: ChallengeView[]; isConnected?: boolean } = {}) {
+function renderHome(overrides: {
+  config?: ContractConfig
+  challenges?: ChallengeView[]
+  isConnected?: boolean
+  snapshot?: Partial<UserSnapshot>
+} = {}) {
   render(
     <HomePage
       account={account}
       isConnected={overrides.isConnected ?? true}
       config={'config' in overrides ? overrides.config : config}
-      snapshot={snapshotWith(overrides.challenges ?? [])}
+      snapshot={snapshotWith(overrides.challenges ?? [], overrides.snapshot)}
       isLoading={false}
       onConnect={vi.fn()}
       onStartWith={vi.fn()}
@@ -198,5 +204,23 @@ describe('Home while contract configuration is still loading', () => {
   it('formats a sub-day match window without rounding it to a day', () => {
     renderHome()
     expect(screen.getByText('3.00 USDC fee · 10 minutes')).toBeTruthy()
+  })
+})
+
+describe('Home secondary actions', () => {
+  it('offers no inline invite action: Friends owns starting a friendship', () => {
+    renderHome()
+    expect(screen.queryByText('Invite someone you know')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Find a match' })).toBeTruthy()
+  })
+
+  it('offers none while queued either', () => {
+    renderHome({
+      snapshot: {
+        currentQueueEntry: { user: account, feeAmount: 3_000_000n, cancelFeeAmount: 0n, queuedAt: 0n, status: 'QUEUED' },
+      },
+    })
+    expect(screen.getByRole('button', { name: 'Cancel search' })).toBeTruthy()
+    expect(screen.queryByText('Invite someone you know')).toBeNull()
   })
 })

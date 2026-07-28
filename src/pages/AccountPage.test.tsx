@@ -95,6 +95,20 @@ describe('AccountPage (self control centre)', () => {
     expect(screen.getByText(/does not verify/i)).toBeTruthy()
   })
 
+  it('lets the avatar speak for itself when a custom profile image is set', () => {
+    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://example.com/a.png' } } })
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('.listRowValue')).toBeNull()
+    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://example.com/a.png')
+  })
+
+  it('says "Not set" when there is no custom profile image', () => {
+    setup()
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('.listRowValue')?.textContent).toBe('Not set')
+    expect(row.querySelector('img')).toBeNull()
+  })
+
   it('hides the allowance row when the allowance already covers a stake', () => {
     setup({ snapshot: { ...snapshot, allowance: 999_000_000n } })
     expect(screen.queryByText('USDC allowance')).toBeNull()
