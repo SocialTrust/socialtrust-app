@@ -543,9 +543,23 @@ a { color: inherit; }
   background: var(--surface);
 }
 .handlePrefix { color: var(--muted); font-weight: 800; }
-.handleField input { border: 0; padding: 12px 0; background: transparent; }
-.handleField input:focus { outline: none; }
-.handleField:focus-within { border-color: var(--green); }
+/* The inner input is only the text cursor: the outer field draws the box. It
+   drops the shared input chrome (radius, border, focus ring) so focusing it
+   cannot paint a second, lighter box inside .handleField. */
+.handleField input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 0;
+  background: transparent;
+}
+.handleField input:focus { outline: none; border-color: transparent; box-shadow: none; }
+.handleField:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(23, 114, 69, 0.12);
+}
 
 /* --------------------------------------------------------------------------
    Challenge rows
