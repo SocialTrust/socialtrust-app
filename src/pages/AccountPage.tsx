@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Address } from "viem";
 import { Copy, Pencil } from "lucide-react";
 import type {
@@ -233,20 +233,6 @@ export function AccountPage({
     sameAddress(connectedAccount, config.owner),
   );
 
-  const loadAccount = useCallback(async () => {
-    if (!address) return;
-    setLoading(true);
-    setError(undefined);
-    try {
-      const next = await readAccountProfile(address);
-      setProfile(next);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load account.");
-    } finally {
-      setLoading(false);
-    }
-  }, [address, readAccountProfile]);
-
   useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -347,7 +333,21 @@ export function AccountPage({
                 onClose={() => setProfileEditOpen(false)}
                 onSave={async (values) => {
                   const success = await onSetProfile(values);
-                  if (success) await loadAccount();
+                  // A profile edit changes only the profile: update that one
+                  // field instead of reloading the whole account (reputation,
+                  // balances, allowance, friends, challenges, Graph activity).
+                  if (success) {
+                    const freshSocialProfile = await readSocialProfile(
+                      address,
+                    ).catch(() => undefined);
+                    if (freshSocialProfile) {
+                      setProfile((current) =>
+                        current
+                          ? { ...current, socialProfile: freshSocialProfile }
+                          : current,
+                      );
+                    }
+                  }
                   return success;
                 }}
               />
