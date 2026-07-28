@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { Address } from 'viem'
 import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from '../types'
+import type { ProfileFormValues } from '../components/ProfileEditSheet'
 import { challengeSortScore, getChallengeState } from '../lib/challenges'
 import { countdownUntil, formatUsdc, relativeTime, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
 import { ChallengeCard } from '../components/ChallengeCard'
@@ -18,15 +19,16 @@ type MatchmakingHeroProps = {
   onFindMatch: () => void
   onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
+  readSocialProfile: (account: Address) => Promise<SocialProfile>
   onStartWith: (address: Address) => void
   onOpenChallenge: (challenge: ChallengeView) => void
   onNavigateAccount: (address: Address) => void
-  onSetTelegramUsername: (handle: string) => Promise<boolean | void>
+  onSetProfile: (values: ProfileFormValues) => Promise<boolean | void>
 }
 
 // Mirror of the profiles hook's handle normalization, enough to gate the
 // "Save handle" button and render the confirmation. The on-chain save still
-// runs the authoritative normalization/validation inside setTelegramUsername.
+// runs the authoritative normalization/validation inside the whole-profile save.
 function normalizeTelegramHandle(raw: string): string {
   let value = (raw ?? '').trim()
   value = value.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
@@ -34,6 +36,22 @@ function normalizeTelegramHandle(raw: string): string {
   value = value.replace(/^@+/, '')
   value = value.split(/[/?#]/)[0]
   return value.trim().toLowerCase()
+}
+
+export async function saveMatchmakingTelegramUsername(
+  account: Address,
+  telegramUsername: string,
+  readSocialProfile: (account: Address) => Promise<SocialProfile>,
+  setProfile: (values: ProfileFormValues) => Promise<boolean | void>,
+) {
+  const current = await readSocialProfile(account)
+  return setProfile({
+    displayName: current.displayName,
+    xUsername: current.xUsername,
+    telegramUsername,
+    discordUsername: current.discordUsername,
+    imgUrl: current.imgUrl,
+  })
 }
 
 function MatchmakingHero({
@@ -45,15 +63,17 @@ function MatchmakingHero({
   onFindMatch,
   onDepositAndMatchMe,
   onCancelMatch,
+  readSocialProfile,
   onStartWith,
   onOpenChallenge,
   onNavigateAccount,
-  onSetTelegramUsername,
+  onSetProfile,
 }: MatchmakingHeroProps) {
   const [gateOpen, setGateOpen] = useState(false)
   const [handleInput, setHandleInput] = useState('')
   const [savedHandle, setSavedHandle] = useState<string | null>(null)
   const [savingHandle, setSavingHandle] = useState(false)
+  const [handleSaveError, setHandleSaveError] = useState<string | null>(null)
 
   const activeMatch = snapshot?.activeMatch
   const queueEntry = snapshot?.currentQueueEntry
@@ -124,13 +144,17 @@ function MatchmakingHero({
   const saveHandle = async () => {
     if (!normalizedHandle || savingHandle) return
     setSavingHandle(true)
+    setHandleSaveError(null)
     try {
-      const ok = await onSetTelegramUsername(handleInput)
+      if (!account) return
+      const ok = await saveMatchmakingTelegramUsername(account, handleInput, readSocialProfile, onSetProfile)
       if (ok) {
         setSavedHandle(normalizedHandle)
         setHandleInput('')
         setGateOpen(false)
       }
+    } catch {
+      setHandleSaveError('Could not load your profile. Try again.')
     } finally {
       setSavingHandle(false)
     }
@@ -143,7 +167,8 @@ function MatchmakingHero({
   else subtext = 'Get matched with a compatible account. Become friends before the deadline and your match fee comes back.'
 
   let caption: string | null
-  if (savedHandle && readyToMatch) caption = `Saved @${savedHandle} — you're ready to match`
+  if (handleSaveError) caption = handleSaveError
+  else if (savedHandle && readyToMatch) caption = `Saved @${savedHandle} — you're ready to match`
   else if (showGate) caption = null
   else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${days}`
   else caption = `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`
@@ -256,7 +281,8 @@ type HomePageProps = {
   onFindMatch: () => void
   onDepositAndMatchMe: (amount: string) => void
   onCancelMatch: () => void
-  onSetTelegramUsername: (handle: string) => Promise<boolean | void>
+  readSocialProfile: (account: Address) => Promise<SocialProfile>
+  onSetProfile: (values: ProfileFormValues) => Promise<boolean | void>
   txPending?: boolean
   onOpenChallenge: (challenge: ChallengeView) => void
   onFinalize: (challenge: ChallengeView) => void
@@ -267,7 +293,7 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, onSetTelegramUsername, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, readSocialProfile, onSetProfile, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
   const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
 
@@ -314,10 +340,11 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
         onFindMatch={onFindMatch}
         onDepositAndMatchMe={onDepositAndMatchMe}
         onCancelMatch={onCancelMatch}
+        readSocialProfile={readSocialProfile}
         onStartWith={onStartWith}
         onOpenChallenge={onOpenChallenge}
         onNavigateAccount={(address) => onNavigate(`/account/${address}`)}
-        onSetTelegramUsername={onSetTelegramUsername}
+        onSetProfile={onSetProfile}
       />
 
       <section className="homeSection feedSection">
