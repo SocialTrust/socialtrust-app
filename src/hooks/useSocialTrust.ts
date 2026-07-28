@@ -1202,6 +1202,26 @@ export function useSocialTrust() {
     setSnapshot(updated)
   }, [readContract, readErc20, readSocialProfile])
 
+  // A profile edit changes only the profile, so refresh that one field instead
+  // of reloading balances, reputation, allowance, friends, challenges, or Graph
+  // data. Mirrors the account-staleness guard used by the other targeted
+  // refreshes: a wallet switch mid-flight must never write one account's profile
+  // into another account's snapshot.
+  const refreshSocialProfileOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
+    const socialProfile = await readSocialProfile(user, blockNumber)
+
+    if (!accountRef.current || !sameAddress(accountRef.current, user)) return socialProfile
+
+    const current = snapshotRef.current
+    if (current) {
+      const updated = { ...current, socialProfile }
+      snapshotRef.current = updated
+      setSnapshot(updated)
+    }
+
+    return socialProfile
+  }, [readSocialProfile])
+
   const retryCoreStateAfterWrite = useCallback(async (user: Address) => {
     // A confirmed receipt-block read should already be authoritative. These
     // follow-up latest-state reads protect against RPC edges that briefly lag
@@ -1332,7 +1352,26 @@ export function useSocialTrust() {
       }
     }
 
+    // A confirmed profile save must land in state before the action resolves, so
+    // the editor closes onto an already-updated avatar, display name, and
+    // handles. Read at the receipt block so the profile definitely includes this
+    // transaction even if an RPC edge still serves a pre-transaction "latest".
+    if (action === 'setProfile') {
+      try {
+        await refreshSocialProfileOnly(writer, receipt.blockNumber)
+      } catch (error) {
+        console.warn('Confirmed profile refresh at receipt block failed; retrying latest state.', error)
+        await refreshSocialProfileOnly(writer).catch((retryError) => {
+          console.warn('Confirmed profile refresh retry failed.', retryError)
+        })
+      }
+    }
+
     setTx({ pending: false, label, success: successMessage(action, args) })
+
+    // Nothing else moved on-chain, so no balance, config, challenge, or subgraph
+    // refresh is owed for a profile edit.
+    if (action === 'setProfile') return
 
     const graphTracked = [
       'deposit',
@@ -1360,7 +1399,7 @@ export function useSocialTrust() {
       ])
       if (graphTracked) await pollGraphForTransaction(writer, hash)
     })()
-  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
+  }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, refreshSocialProfileOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
 
   const write = useCallback(async (action: ActionName, args: readonly unknown[] = [], label = 'Confirm transaction'): Promise<boolean> => {
     if (appConfig.isMockMode) {
