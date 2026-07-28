@@ -121,18 +121,8 @@ function walletConnectionError() {
   return 'Wallet modal is not ready yet. Try again in a moment.'
 }
 
-// Profile field normalization + validation. setProfile overwrites the whole
-// profile on chain, so these run on both the full multi-field save and every
-// per-field helper to keep a single source of truth for what gets stored.
+// Profile field normalization + validation for the single whole-profile save.
 export type ProfileField = 'displayName' | 'xUsername' | 'telegramUsername' | 'discordUsername' | 'imgUrl'
-
-const PROFILE_FIELD_LABEL: Record<ProfileField, string> = {
-  displayName: 'Display name',
-  xUsername: 'X username',
-  telegramUsername: 'Telegram username',
-  discordUsername: 'Discord username',
-  imgUrl: 'Image URL',
-}
 
 // Turn a pasted handle or profile URL into a bare username: drop a leading "@",
 // strip a "t.me/", "x.com/", or "twitter.com/" prefix (with optional scheme /
@@ -161,8 +151,7 @@ function normalizeProfileField(field: ProfileField, raw: string): string {
 }
 
 // Validate an already-normalized value. Returns an error string or null. Empty
-// handles/URLs are allowed here (the full save may legitimately clear a field);
-// per-field helpers reject empties before calling this.
+// handles/URLs are allowed here (the full save may legitimately clear a field).
 function validateProfileField(field: ProfileField, value: string): string | null {
   if (field === 'displayName') {
     if (!value) return 'Display name is required.'
@@ -186,10 +175,6 @@ function validateProfileField(field: ProfileField, value: string): string | null
   // imgUrl
   if (value && (!value.startsWith('https://') || /\s/.test(value) || value.length > 1024)) return 'Image URL must be a valid https:// URL without spaces.'
   return null
-}
-
-function profileToArgs(profile: SocialProfile): [string, string, string, string, string] {
-  return [profile.displayName, profile.xUsername, profile.telegramUsername, profile.discordUsername, profile.imgUrl]
 }
 
 type GraphChallenge = {
@@ -640,19 +625,21 @@ export function useSocialTrust() {
     }
     if (!appConfig.hasProfiles) return emptySocialProfile
 
-    try {
-      const result = await publicClient.readContract({
-        address: appConfig.profilesAddress,
-        abi: socialTrustProfilesAbi,
-        functionName: 'getProfile',
-        args: [user],
-        ...(blockNumber !== undefined ? { blockNumber } : {}),
-      })
-      return normalizeSocialProfile(result)
-    } catch {
-      return emptySocialProfile
-    }
+    const result = await publicClient.readContract({
+      address: appConfig.profilesAddress,
+      abi: socialTrustProfilesAbi,
+      functionName: 'getProfile',
+      args: [user],
+      ...(blockNumber !== undefined ? { blockNumber } : {}),
+    })
+    return normalizeSocialProfile(result)
   }, [emptySocialProfile, normalizeSocialProfile])
+
+  // Display-only surfaces may degrade to an absent profile. Editors must call
+  // readSocialProfile directly so an RPC failure can never become blank data.
+  const readSocialProfileForgiving = useCallback(async (user: Address, blockNumber?: bigint): Promise<SocialProfile> => {
+    return readSocialProfile(user, blockNumber).catch(() => ({ ...emptySocialProfile }))
+  }, [emptySocialProfile, readSocialProfile])
 
   const readSocialProfiles = useCallback(async (users: Address[]): Promise<Record<string, SocialProfile>> => {
     const unique = Array.from(new Set(users.map((user) => user.toLowerCase())))
@@ -661,7 +648,7 @@ export function useSocialTrust() {
 
     if (unique.length === 0) return {}
     if (appConfig.isMockMode || !appConfig.hasProfiles) {
-      const entries = await Promise.all(unique.map(async (user) => [user.toLowerCase(), await readSocialProfile(user)] as const))
+      const entries = await Promise.all(unique.map(async (user) => [user.toLowerCase(), await readSocialProfileForgiving(user)] as const))
       return Object.fromEntries(entries)
     }
 
@@ -675,10 +662,10 @@ export function useSocialTrust() {
       const profiles = result as unknown[]
       return Object.fromEntries(unique.map((user, index) => [user.toLowerCase(), normalizeSocialProfile(profiles[index])]))
     } catch {
-      const entries = await Promise.all(unique.map(async (user) => [user.toLowerCase(), await readSocialProfile(user)] as const))
+      const entries = await Promise.all(unique.map(async (user) => [user.toLowerCase(), await readSocialProfileForgiving(user)] as const))
       return Object.fromEntries(entries)
     }
-  }, [emptySocialProfile, normalizeSocialProfile, readSocialProfile])
+  }, [normalizeSocialProfile, readSocialProfileForgiving])
 
   const ensureWalletChain = useCallback(async () => {
     if (appConfig.isMockMode) return
@@ -1452,25 +1439,6 @@ export function useSocialTrust() {
     }
   }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, refresh, switchChainAsync, walletClient])
 
-  // Replace a single profile field without ever hand-building a full profile at
-  // the call site. Because setProfile overwrites all five fields, we read the
-  // caller's current profile fresh from chain (never a stale query cache),
-  // replace only the target field, and write the merged whole back.
-  const submitProfileField = useCallback(async (field: ProfileField, rawValue: string): Promise<boolean | void> => {
-    if (!account) return setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
-    if (!appConfig.hasProfiles) return setTx({ pending: false, label: '', error: 'Set VITE_PROFILES_ADDRESS before editing profiles.' })
-
-    const value = normalizeProfileField(field, rawValue)
-    if (!value) return setTx({ pending: false, label: '', error: `${PROFILE_FIELD_LABEL[field]} can't be empty.` })
-
-    const fieldError = validateProfileField(field, value)
-    if (fieldError) return setTx({ pending: false, label: '', error: fieldError })
-
-    const current = await readSocialProfile(account)
-    const merged: SocialProfile = { ...current, [field]: value }
-    return write('setProfile', profileToArgs(merged), 'Save profile')
-  }, [account, readSocialProfile, write])
-
   const actions = useMemo(() => ({
     approveUsdc: () => write('approveUsdc', [], 'Approve USDC'),
     deposit: (amount: string) => write('deposit', [parseUsdc(amount)], 'Deposit USDC'),
@@ -1533,41 +1501,32 @@ export function useSocialTrust() {
       if (!isAddressLike(userAddress)) return setTx({ pending: false, label: '', error: 'Enter a valid wallet address.' })
       return write('setScore', [userAddress, BigInt(score || '0')], 'Set reputation score')
     },
-    // Full multi-field save used by the profile edit sheet. It legitimately
-    // sets every field the sheet exposes, but reads the current profile fresh
-    // to preserve fields the sheet does not manage (e.g. Discord) instead of
-    // blanking them.
-    setProfile: async (values: { displayName: string; xUsername: string; telegramUsername: string; imgUrl: string }) => {
+    setProfile: async (values: { displayName: string; xUsername: string; telegramUsername: string; discordUsername: string; imgUrl: string }) => {
       if (!account) return setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
       if (!appConfig.hasProfiles) return setTx({ pending: false, label: '', error: 'Set VITE_PROFILES_ADDRESS before editing profiles.' })
 
       const displayName = normalizeProfileField('displayName', values.displayName)
       const xUsername = normalizeProfileField('xUsername', values.xUsername)
       const telegramUsername = normalizeProfileField('telegramUsername', values.telegramUsername)
+      // Discord is intentionally not exposed by the editor. Preserve the
+      // strict-load snapshot byte-for-byte rather than normalizing hidden data.
+      const discordUsername = values.discordUsername
       const imgUrl = normalizeProfileField('imgUrl', values.imgUrl)
 
       for (const [field, value] of [
         ['displayName', displayName],
         ['xUsername', xUsername],
         ['telegramUsername', telegramUsername],
+        ['discordUsername', discordUsername],
         ['imgUrl', imgUrl],
       ] as const) {
         const error = validateProfileField(field, value)
         if (error) return setTx({ pending: false, label: '', error })
       }
 
-      const current = await readSocialProfile(account)
-      return write('setProfile', [displayName, xUsername, telegramUsername, current.discordUsername, imgUrl], 'Save profile')
+      return write('setProfile', [displayName, xUsername, telegramUsername, discordUsername, imgUrl], 'Save profile')
     },
-    // Per-field helpers. Every single-field profile update must go through one
-    // of these so no call site hand-builds a full profile (and risks blanking
-    // the others).
-    setDisplayName: (name: string) => submitProfileField('displayName', name),
-    setXUsername: (handle: string) => submitProfileField('xUsername', handle),
-    setTelegramUsername: (handle: string) => submitProfileField('telegramUsername', handle),
-    setDiscordUsername: (handle: string) => submitProfileField('discordUsername', handle),
-    setImgUrl: (url: string) => submitProfileField('imgUrl', url),
-  }), [account, readSocialProfile, submitProfileField, write])
+  }), [account, write])
 
   return {
     account,
@@ -1585,6 +1544,7 @@ export function useSocialTrust() {
     switchToAppNetwork,
     refresh,
     readAccountProfile,
+    readSocialProfile,
     actions,
     clearTx: () => setTx({ pending: false, label: '' }),
   }

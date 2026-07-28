@@ -36,6 +36,7 @@ function App() {
     disconnect,
     refresh,
     readAccountProfile,
+    readSocialProfile,
     actions,
     clearTx,
   } = useSocialTrust()
@@ -170,7 +171,8 @@ function App() {
           onFindMatch={actions.matchMe}
           onDepositAndMatchMe={actions.depositAndMatchMe}
           onCancelMatch={actions.cancelMatchMe}
-          onSetTelegramUsername={actions.setTelegramUsername}
+          readSocialProfile={readSocialProfile}
+          onSetProfile={actions.setProfile}
           txPending={tx.pending}
           onOpenChallenge={openChallenge}
           onFinalize={finalize}
@@ -189,6 +191,7 @@ function App() {
           isConnected={isConnected}
           config={config}
           readAccountProfile={readAccountProfile}
+          readSocialProfile={readSocialProfile}
           onConnect={connect}
           onBackHome={() => navigate('/')}
           onStartWith={startWith}
@@ -262,7 +265,10 @@ function App() {
 
       <ProfileEditSheet
         open={profileEditOpen}
-        profile={snapshot?.socialProfile}
+        loadProfile={() => {
+          if (!account) return Promise.reject(new Error('Connect your wallet first.'))
+          return readSocialProfile(account)
+        }}
         onClose={() => setProfileEditOpen(false)}
         onSave={actions.setProfile}
       />
