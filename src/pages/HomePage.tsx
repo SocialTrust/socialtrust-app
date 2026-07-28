@@ -73,7 +73,8 @@ function MatchmakingHero({
   const [handleInput, setHandleInput] = useState('')
   const [savedHandle, setSavedHandle] = useState<string | null>(null)
   const [savingHandle, setSavingHandle] = useState(false)
-  const [handleSaveError, setHandleSaveError] = useState<string | null>(null)
+  const [checkingHandle, setCheckingHandle] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
 
   const activeMatch = snapshot?.activeMatch
   const queueEntry = snapshot?.currentQueueEntry
@@ -131,20 +132,41 @@ function MatchmakingHero({
   const days = config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'
 
   // Matching reaches people over Telegram, so entering the queue is gated on a
-  // handle being set. Once it is set on the profile — or freshly saved in this
-  // session — "Find a match" behaves normally. Otherwise the first tap opens an
-  // inline handle field (progressive disclosure, not an error) and the button
-  // becomes "Save handle" until the handle is stored on chain.
-  const hasTelegram = Boolean(snapshot?.socialProfile?.telegramUsername?.trim())
-  const readyToMatch = hasTelegram || savedHandle !== null
+  // handle being stored on chain. The profiles contract is the only authority
+  // here: it already rejects a malformed non-empty handle at write time, so a
+  // fresh strict read that comes back non-empty is enough to match. Local state
+  // — including a handle saved earlier in this session — never authorizes
+  // matchmaking, because the profile can be cleared from the editor afterwards.
+  // When the fresh read comes back empty the first tap opens an inline handle
+  // field (progressive disclosure, not an error) and the button becomes
+  // "Save handle" until the handle is stored on chain.
   const normalizedHandle = normalizeTelegramHandle(handleInput)
 
   const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))
 
+  const tryStartMatching = async () => {
+    if (!account || checkingHandle) return
+    setCheckingHandle(true)
+    setProfileError(null)
+    try {
+      const profile = await readSocialProfile(account)
+      if (!profile.telegramUsername.trim()) {
+        setGateOpen(true)
+        return
+      }
+      startMatching()
+    } catch {
+      // Fail closed: an unverifiable profile never reaches a wallet prompt.
+      setProfileError('Could not load your profile. Try again.')
+    } finally {
+      setCheckingHandle(false)
+    }
+  }
+
   const saveHandle = async () => {
     if (!normalizedHandle || savingHandle) return
     setSavingHandle(true)
-    setHandleSaveError(null)
+    setProfileError(null)
     try {
       if (!account) return
       const ok = await saveMatchmakingTelegramUsername(account, handleInput, readSocialProfile, onSetProfile)
@@ -154,22 +176,20 @@ function MatchmakingHero({
         setGateOpen(false)
       }
     } catch {
-      setHandleSaveError('Could not load your profile. Try again.')
+      setProfileError('Could not load your profile. Try again.')
     } finally {
       setSavingHandle(false)
     }
   }
 
-  const showGate = gateOpen && !readyToMatch
-
   let subtext: string
-  if (showGate) subtext = 'Matches reach you on Telegram. Add your handle to join the queue.'
+  if (gateOpen) subtext = 'Matches reach you on Telegram. Add your handle to join the queue.'
   else subtext = 'Get matched with a compatible account. Become friends before the deadline and your match fee comes back.'
 
   let caption: string | null
-  if (handleSaveError) caption = handleSaveError
-  else if (savedHandle && readyToMatch) caption = `Saved @${savedHandle} — you're ready to match`
-  else if (showGate) caption = null
+  if (profileError) caption = profileError
+  else if (savedHandle && !gateOpen) caption = `Saved @${savedHandle} — you're ready to match`
+  else if (gateOpen) caption = null
   else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${days}`
   else caption = `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`
 
@@ -178,7 +198,7 @@ function MatchmakingHero({
       <h1>Ready to build trust?</h1>
       <p>{subtext}</p>
 
-      {showGate ? (
+      {gateOpen ? (
         <div className="matchHandleField">
           <span className="matchHandlePrefix">@</span>
           <input
@@ -196,15 +216,15 @@ function MatchmakingHero({
         </div>
       ) : null}
 
-      {showGate ? (
+      {gateOpen ? (
         <button className="trustButton" disabled={savingHandle || !normalizedHandle} onClick={saveHandle}>
           Save handle
         </button>
       ) : (
         <button
           className="trustButton"
-          disabled={txPending || matchFee === 0n}
-          onClick={() => (readyToMatch ? startMatching() : setGateOpen(true))}
+          disabled={txPending || checkingHandle || matchFee === 0n}
+          onClick={() => void tryStartMatching()}
         >
           Find a match
         </button>
