@@ -12,6 +12,7 @@ import { INTEGER_AMOUNT_ERROR, USDC_AMOUNT_ERROR, parseIntegerStrict, parseUsdcS
 import { PROFILE_IMAGE_ERROR, isAllowedProfileImageUrl } from '../lib/profileImage'
 import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
 import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
+import { isCurrentRequest as isCurrentRequestFor, ownedSnapshot } from '../lib/accountState'
 
 const publicClient = createPublicClient({
   chain: configuredChain,
@@ -408,6 +409,10 @@ export function useSocialTrust() {
 
   const [snapshot, setSnapshot] = useState<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
   const snapshotRef = useRef<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
+  // Which account the snapshot above describes. Without this, "is there a
+  // snapshot?" and "is it this wallet's snapshot?" are the same question, and
+  // a slow response for the previous wallet can merge into the current one.
+  const snapshotAccountRef = useRef<Address | undefined>(appConfig.isMockMode ? mockUser : undefined)
   const snapshotLoadSeqRef = useRef(0)
   const matchSnapshotRef = useRef<AccountMatchSnapshot | undefined>(undefined)
   const [config, setConfig] = useState<ContractConfig | undefined>(appConfig.isMockMode ? mockConfig : undefined)
@@ -428,10 +433,56 @@ export function useSocialTrust() {
   const isOwner = Boolean(account && config?.owner && sameAddress(account, config.owner))
   const wrongNetwork = Boolean(!appConfig.isMockMode && isConnected && typeof chainId === 'number' && chainId !== appConfig.chainId)
 
-  useEffect(() => {
-    matchSnapshotRef.current = undefined
+  /**
+   * Every account-derived value, dropped at once.
+   *
+   * Bumping the sequence counters invalidates whatever is already in flight,
+   * so a response for the previous wallet cannot land afterwards, and clearing
+   * the snapshot means the UI shows nothing rather than the previous wallet's
+   * balances, friends, challenges or activity while the new load runs.
+   */
+  const clearAccountState = useCallback(() => {
+    snapshotLoadSeqRef.current += 1
     graphPollSeqRef.current += 1
-  }, [account])
+    matchSnapshotRef.current = undefined
+    snapshotRef.current = appConfig.isMockMode ? mockSnapshot : undefined
+    snapshotAccountRef.current = appConfig.isMockMode ? mockUser : undefined
+    setSnapshot(appConfig.isMockMode ? mockSnapshot : undefined)
+    setActivityError(undefined)
+  }, [])
+
+  /**
+   * True only when `user` is still the connected account and, when a request
+   * id is supplied, that load is still the newest one. Checked immediately
+   * before every state or ref write.
+   */
+  const isCurrentRequest = useCallback((user: Address, requestId?: number) => {
+    return isCurrentRequestFor({ user, requestId }, accountRef.current, snapshotLoadSeqRef.current)
+  }, [])
+
+  /** The snapshot only if it belongs to `user`; never another wallet's. */
+  const snapshotFor = useCallback((user: Address) => {
+    return ownedSnapshot(snapshotRef.current, snapshotAccountRef.current, user)
+  }, [])
+
+  /**
+   * The single writer for account-derived snapshot state. Returns false when
+   * the result was discarded as stale, so callers can skip follow-up work.
+   */
+  const commitSnapshot = useCallback((user: Address, next: UserSnapshot, requestId?: number) => {
+    if (!isCurrentRequest(user, requestId)) return false
+    snapshotRef.current = next
+    snapshotAccountRef.current = user
+    setSnapshot(next)
+    return true
+  }, [isCurrentRequest])
+
+  // A changed or removed account invalidates everything derived from the old
+  // one. This effect is declared before the loading effect, so React runs the
+  // clear first and the new load starts from nothing.
+  useEffect(() => {
+    clearAccountState()
+  }, [account, clearAccountState])
 
   useEffect(() => {
     return () => {
@@ -819,30 +870,18 @@ export function useSocialTrust() {
     const accepted = acceptMatchSnapshot(matchSnapshotRef.current, { ...next, account: user }, accountRef.current)
     if (!accepted || accepted === matchSnapshotRef.current) return false
     matchSnapshotRef.current = accepted
-    const currentSnapshot = snapshotRef.current
+    // Merge only into this account's own snapshot.
+    const currentSnapshot = snapshotFor(user)
     if (currentSnapshot) {
-      snapshotRef.current = {
+      commitSnapshot(user, {
         ...currentSnapshot,
         currentQueueEntry: accepted.currentQueueEntry,
         activeMatch: accepted.activeMatch,
         matchPartnerProfile: accepted.matchPartnerProfile,
-      }
+      })
     }
-    setSnapshot((current) => {
-      if (!current || !accountRef.current || !sameAddress(accountRef.current, user)) return current
-      const updated = {
-        ...current,
-        currentQueueEntry: accepted.currentQueueEntry,
-        activeMatch: accepted.activeMatch,
-        matchPartnerProfile: accepted.matchPartnerProfile,
-      }
-      // Merge against React's current value, but the ref was already updated
-      // synchronously above so unrelated targeted refreshes cannot clobber it.
-      snapshotRef.current = updated
-      return updated
-    })
     return true
-  }, [])
+  }, [commitSnapshot, snapshotFor])
 
   const refreshMatchStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
     const next = await readMatchStateOnChain(user, blockNumber)
@@ -853,29 +892,33 @@ export function useSocialTrust() {
   const refreshGraphStateOnly = useCallback(async (user: Address) => {
     try {
       const graphState = await readGraphState(user)
-      if (!accountRef.current || !sameAddress(accountRef.current, user)) return undefined
+      if (!isCurrentRequest(user)) return undefined
       setActivityError(undefined)
       const [friendProfiles, friendRepPairs] = await Promise.all([
         readSocialProfiles(profileTargets(graphState)),
         Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
       ])
       const friendRepScores = Object.fromEntries(friendRepPairs)
-      setSnapshot((current) => {
-        if (!current || !accountRef.current || !sameAddress(accountRef.current, user)) return current
-        const updated = { ...current, friendCount: BigInt(graphState.friends.length), friends: graphState.friends,
-          challenges: graphState.challenges, recentActivity: graphState.recentActivity, friendProfiles, friendRepScores }
-        snapshotRef.current = updated
-        return updated
+      const base = snapshotFor(user)
+      if (!base) return graphState
+      commitSnapshot(user, {
+        ...base,
+        friendCount: BigInt(graphState.friends.length),
+        friends: graphState.friends,
+        challenges: graphState.challenges,
+        recentActivity: graphState.recentActivity,
+        friendProfiles,
+        friendRepScores,
       })
       return graphState
     } catch (error) {
       console.warn('The Graph state refresh failed.', error)
-      if (accountRef.current && sameAddress(accountRef.current, user)) {
+      if (isCurrentRequest(user)) {
         setActivityError(error instanceof Error ? error.message : 'The indexed activity query failed.')
       }
       return undefined
     }
-  }, [readContract, readGraphState, readSocialProfiles])
+  }, [commitSnapshot, isCurrentRequest, readContract, readGraphState, readSocialProfiles, snapshotFor])
 
   const pollGraphForTransaction = useCallback(async (user: Address, hash: `0x${string}`) => {
     const pollId = ++graphPollSeqRef.current
@@ -897,24 +940,32 @@ export function useSocialTrust() {
   const loadSnapshot = useCallback(async (user: Address, _options: { refreshActivity?: boolean } = {}) => {
     if (appConfig.isMockMode) {
       snapshotRef.current = mockSnapshot
+      snapshotAccountRef.current = mockUser
       setSnapshot(mockSnapshot)
       return mockSnapshot
     }
 
     const requestId = snapshotLoadSeqRef.current + 1
     snapshotLoadSeqRef.current = requestId
-    const previousSnapshot = snapshotRef.current
+    // Only this account's own snapshot may seed anything below. A snapshot
+    // belonging to a previously connected wallet is not a fallback.
+    const previousSnapshot = snapshotFor(user)
 
     const graphStatePromise = readGraphState(user).then((state) => {
-      setActivityError(undefined)
+      if (isCurrentRequest(user, requestId)) setActivityError(undefined)
       return state
     }).catch((error) => {
-      console.warn('The Graph account state query failed; preserving the last indexed lists.', error)
-      setActivityError(error instanceof Error ? error.message : 'The indexed activity query failed.')
+      console.warn('The Graph account state query failed; preserving this account\'s last indexed lists.', error)
+      if (isCurrentRequest(user, requestId)) {
+        setActivityError(error instanceof Error ? error.message : 'The indexed activity query failed.')
+      }
+      // Re-read rather than closing over the value captured before the await:
+      // the snapshot may have been cleared by an account change in between.
+      const stillOurs = snapshotFor(user)
       return {
-        challenges: previousSnapshot?.challenges ?? [],
-        friends: previousSnapshot?.friends ?? [],
-        recentActivity: previousSnapshot?.recentActivity ?? [],
+        challenges: stillOurs?.challenges ?? [],
+        friends: stillOurs?.friends ?? [],
+        recentActivity: stillOurs?.recentActivity ?? [],
       }
     })
 
@@ -963,9 +1014,7 @@ export function useSocialTrust() {
       friendRepScores: previousSnapshot?.friendRepScores,
     }
 
-    if (snapshotLoadSeqRef.current !== requestId || !accountRef.current || !sameAddress(accountRef.current, user)) return nextSnapshot
-    snapshotRef.current = nextSnapshot
-    setSnapshot(nextSnapshot)
+    if (!commitSnapshot(user, nextSnapshot, requestId)) return nextSnapshot
     if (matchState) applyMatchSnapshot(user, matchState)
 
     void Promise.all([
@@ -973,20 +1022,19 @@ export function useSocialTrust() {
       readSocialProfiles(profileTargets(graphState)),
       Promise.all(graphState.friends.map(async (friend) => [friend.toLowerCase(), await readContract<bigint>('repScore', [friend])] as const)),
     ]).then(([socialProfile, friendProfiles, friendRepPairs]) => {
-      if (snapshotLoadSeqRef.current !== requestId) return
+      // Both conditions again: this detached follow-up can settle long after
+      // the wallet changed.
+      if (!isCurrentRequest(user, requestId)) return
+      const base = snapshotFor(user)
+      if (!base) return
       const friendRepScores = Object.fromEntries(friendRepPairs)
-      setSnapshot((current) => {
-        const base = current ?? nextSnapshot
-        const updated = { ...base, socialProfile, friendProfiles, friendRepScores }
-        snapshotRef.current = updated
-        return updated
-      })
+      commitSnapshot(user, { ...base, socialProfile, friendProfiles, friendRepScores }, requestId)
     }).catch((error) => {
       console.warn('Secondary SocialTrust data refresh failed.', error)
     })
 
     return nextSnapshot
-  }, [applyMatchSnapshot, readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles])
+  }, [applyMatchSnapshot, commitSnapshot, isCurrentRequest, readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles, snapshotFor])
 
   const refresh = useCallback(async () => {
     setIsLoading(true)
@@ -1030,14 +1078,10 @@ export function useSocialTrust() {
   }, [switchChainAsync])
 
   const disconnect = useCallback(() => {
-    snapshotLoadSeqRef.current += 1
-    matchSnapshotRef.current = undefined
-    graphPollSeqRef.current += 1
+    clearAccountState()
     wagmiDisconnect()
-    setSnapshot(appConfig.isMockMode ? mockSnapshot : undefined)
-    snapshotRef.current = appConfig.isMockMode ? mockSnapshot : undefined
     setTx({ pending: false, label: '', success: 'Wallet disconnected.' })
-  }, [wagmiDisconnect])
+  }, [clearAccountState, wagmiDisconnect])
 
   const connect = useCallback(() => {
     if (appConfig.isMockMode) {
@@ -1144,8 +1188,8 @@ export function useSocialTrust() {
     await waitForSuccessfulReceipt(hash)
   }, [account, readErc20, walletClient])
 
-  const upsertChallengeInSnapshot = useCallback((challenge: ChallengeView): UserSnapshot | undefined => {
-    const base = snapshotRef.current
+  const upsertChallengeInSnapshot = useCallback((user: Address, challenge: ChallengeView): UserSnapshot | undefined => {
+    const base = snapshotFor(user)
     if (!base) return undefined
 
     const pairKey = challenge.pairKey.toLowerCase()
@@ -1161,19 +1205,16 @@ export function useSocialTrust() {
     if (!replaced) challenges.unshift(challenge)
 
     const updated = { ...base, challenges }
-    snapshotRef.current = updated
-    setSnapshot(updated)
+    if (!commitSnapshot(user, updated)) return undefined
     return updated
-  }, [])
+  }, [commitSnapshot, snapshotFor])
 
-  const removeChallengeFromSnapshot = useCallback((other: Address) => {
-    const base = snapshotRef.current
+  const removeChallengeFromSnapshot = useCallback((user: Address, other: Address) => {
+    const base = snapshotFor(user)
     if (!base) return
     const challenges = base.challenges.filter((challenge) => !sameAddress(challenge.other, other))
-    const updated = { ...base, challenges }
-    snapshotRef.current = updated
-    setSnapshot(updated)
-  }, [])
+    commitSnapshot(user, { ...base, challenges })
+  }, [commitSnapshot, snapshotFor])
 
   const refreshCoreStateOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
     const [appBalance, pendingBonus, bonusPaidTo, repScore, owner, walletUsdc, allowance, socialProfile] = await Promise.all([
@@ -1190,14 +1231,13 @@ export function useSocialTrust() {
     // Keep the ref authoritative immediately. In v44 this happened inside the
     // React state updater, which can run later; a targeted challenge refresh
     // could then read the stale ref and write the old balance back over the
-    // freshly fetched balance.
-    const current = snapshotRef.current
+    // freshly fetched balance. The reads above are awaited, so the wallet may
+    // have changed underneath them: merge only into this account's snapshot.
+    const current = snapshotFor(user)
     if (!current) return
 
-    const updated = { ...current, appBalance, pendingBonus, bonusPaidTo, repScore, owner, walletUsdc, allowance, socialProfile }
-    snapshotRef.current = updated
-    setSnapshot(updated)
-  }, [readContract, readErc20, readSocialProfile])
+    commitSnapshot(user, { ...current, appBalance, pendingBonus, bonusPaidTo, repScore, owner, walletUsdc, allowance, socialProfile })
+  }, [commitSnapshot, readContract, readErc20, readSocialProfile, snapshotFor])
 
   // A profile edit changes only the profile, so refresh that one field instead
   // of reloading balances, reputation, allowance, friends, challenges, or Graph
@@ -1207,17 +1247,13 @@ export function useSocialTrust() {
   const refreshSocialProfileOnly = useCallback(async (user: Address, blockNumber?: bigint) => {
     const socialProfile = await readSocialProfile(user, blockNumber)
 
-    if (!accountRef.current || !sameAddress(accountRef.current, user)) return socialProfile
+    if (!isCurrentRequest(user)) return socialProfile
 
-    const current = snapshotRef.current
-    if (current) {
-      const updated = { ...current, socialProfile }
-      snapshotRef.current = updated
-      setSnapshot(updated)
-    }
+    const current = snapshotFor(user)
+    if (current) commitSnapshot(user, { ...current, socialProfile })
 
     return socialProfile
-  }, [readSocialProfile])
+  }, [commitSnapshot, isCurrentRequest, readSocialProfile, snapshotFor])
 
   const retryCoreStateAfterWrite = useCallback(async (user: Address) => {
     // A confirmed receipt-block read should already be authoritative. These
@@ -1225,21 +1261,21 @@ export function useSocialTrust() {
     // immediately after confirmation without blocking the transaction UI.
     for (const delayMs of [350, 1000, 2000]) {
       await sleep(delayMs)
-      if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+      if (!isCurrentRequest(user)) return
       try {
         await refreshCoreStateOnly(user)
       } catch (error) {
         console.warn(`Post-transaction balance refresh retry after ${delayMs}ms failed.`, error)
       }
     }
-  }, [refreshCoreStateOnly])
+  }, [isCurrentRequest, refreshCoreStateOnly])
 
   // Receipt pinning is deliberately one-shot. Every delayed retry reads a newly
   // captured latest block after the selected RPC edge has caught up to the receipt.
   const retryBalanceAndMatchAfterWrite = useCallback(async (user: Address, receiptBlock: bigint) => {
     for (const delayMs of [350, 1000, 2000]) {
       await sleep(delayMs)
-      if (!accountRef.current || !sameAddress(accountRef.current, user)) return
+      if (!isCurrentRequest(user)) return
       try {
         while (await publicClient.getBlockNumber() < receiptBlock) await sleep(250)
         await refreshCoreStateOnly(user)
@@ -1248,7 +1284,7 @@ export function useSocialTrust() {
         console.warn(`Post-transaction balance/match refresh retry after ${delayMs}ms failed.`, error)
       }
     }
-  }, [refreshCoreStateOnly, refreshMatchStateOnly])
+  }, [isCurrentRequest, refreshCoreStateOnly, refreshMatchStateOnly])
 
   const refreshAfterWrite = useCallback(async (action: ActionName, args: readonly unknown[]) => {
     if (!account) return
@@ -1271,11 +1307,11 @@ export function useSocialTrust() {
       const terminal = ['cancelPendingStake', 'rejectPendingStake', 'steal', 'finalizeFriendship'].includes(action)
 
       if (!challenge) {
-        if (terminal) removeChallengeFromSnapshot(other as Address)
+        if (terminal) removeChallengeFromSnapshot(account, other as Address)
         return
       }
 
-      upsertChallengeInSnapshot(challenge)
+      upsertChallengeInSnapshot(account, challenge)
     } catch (error) {
       console.warn('Targeted challenge refresh failed.', error)
     }
