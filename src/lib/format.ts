@@ -20,14 +20,6 @@ export function formatUsdc(value?: bigint, opts?: { compact?: boolean; truncate?
   }).format(amount)
 }
 
-export function parseUsdc(input: string) {
-  const cleaned = input.trim().replace(/,/g, '')
-  if (!cleaned || Number.isNaN(Number(cleaned))) return 0n
-  const [whole, fraction = ''] = cleaned.split('.')
-  const safeFraction = `${fraction.slice(0, 6)}000000`.slice(0, 6)
-  return BigInt(whole || '0') * 1_000_000n + BigInt(safeFraction || '0')
-}
-
 export function secondsToLabel(seconds?: bigint | number, opts?: { raw?: boolean }) {
   const total = Math.max(0, Math.floor(Number(seconds ?? 0)))
   if (opts?.raw) return `${total}s`

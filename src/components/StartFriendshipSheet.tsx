@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import type { Address } from 'viem'
 import type { ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import { copyText, formatUsdc, formatUsdcOrDash, isAddressLike, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
+import { formatUsdcPlain } from '../lib/amount'
 import { Sheet } from './Sheet'
 import { ProfileAvatar, displayNameFor } from './ProfileAvatar'
 
@@ -177,7 +178,7 @@ export function StartFriendshipSheet({
     try {
       const success = hasEnough
         ? await onStake(other)
-        : await onDepositAndStake(other, formatUsdc(missingStake))
+        : await onDepositAndStake(other, formatUsdcPlain(missingStake))
       if (success) {
         onSubmitted?.()
         onClose()

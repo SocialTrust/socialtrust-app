@@ -7,7 +7,8 @@ import { socialTrustAbi, erc20Abi } from '../contracts/socialTrustAbi'
 import { socialTrustProfilesAbi } from '../contracts/socialTrustProfilesAbi'
 import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchSnapshot, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
 import { appConfig, configuredChain } from '../lib/config'
-import { isAddressLike, parseUsdc, sameAddress, ZERO_ADDRESS } from '../lib/format'
+import { isAddressLike, sameAddress, ZERO_ADDRESS } from '../lib/format'
+import { INTEGER_AMOUNT_ERROR, USDC_AMOUNT_ERROR, parseIntegerStrict, parseUsdcStrict } from '../lib/amount'
 import { PROFILE_IMAGE_ERROR, isAllowedProfileImageUrl } from '../lib/profileImage'
 import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
 import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
@@ -1474,48 +1475,75 @@ export function useSocialTrust() {
     }
   }, [account, ensureUsdcAllowance, ensureWalletChain, finishWrite, isConnected, refresh, switchChainAsync, walletClient])
 
+  // Every numeric argument is validated before it can reach `write`. A failed
+  // parse surfaces a readable error through the normal transaction state and
+  // returns false, so no contract call is made.
+  const failValidation = useCallback((error: string) => {
+    setTx({ pending: false, label: '', error })
+    return false
+  }, [])
+
   const actions = useMemo(() => ({
     approveUsdc: () => write('approveUsdc', [], 'Approve USDC'),
-    deposit: (amount: string) => write('deposit', [parseUsdc(amount)], 'Deposit USDC'),
-    withdraw: (amount: string) => write('withdraw', [parseUsdc(amount)], 'Withdraw USDC'),
-    fundBonusPool: (amount: string) => write('fundBonusPool', [parseUsdc(amount)], 'Fund bonus pool'),
+    deposit: async (amount: string) => {
+      const value = parseUsdcStrict(amount)
+      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      return write('deposit', [value], 'Deposit USDC')
+    },
+    withdraw: async (amount: string) => {
+      const value = parseUsdcStrict(amount)
+      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      return write('withdraw', [value], 'Withdraw USDC')
+    },
+    fundBonusPool: async (amount: string) => {
+      const value = parseUsdcStrict(amount)
+      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      return write('fundBonusPool', [value], 'Fund bonus pool')
+    },
     stakeForFriendship: async (other: string) => {
-      if (!isAddressLike(other)) {
-        setTx({ pending: false, label: '', error: 'Enter a valid wallet address.' })
-        return false
-      }
+      if (!isAddressLike(other)) return failValidation('Enter a valid wallet address.')
       return write('stakeForFriendship', [other], 'Stake for friendship')
     },
     depositAndStakeForFriendship: async (other: string, amount: string) => {
-      if (!isAddressLike(other)) {
-        setTx({ pending: false, label: '', error: 'Enter a valid wallet address.' })
-        return false
-      }
-      return write('depositAndStakeForFriendship', [other, parseUsdc(amount)], 'Deposit and stake')
+      if (!isAddressLike(other)) return failValidation('Enter a valid wallet address.')
+      const value = parseUsdcStrict(amount)
+      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      return write('depositAndStakeForFriendship', [other, value], 'Deposit and stake')
     },
     cancelPendingStake: (other: Address) => write('cancelPendingStake', [other], 'Cancel pending stake'),
     rejectPendingStake: (staker: Address) => write('rejectPendingStake', [staker], 'Reject pending stake'),
     steal: (other: Address) => write('steal', [other], 'Steal pot'),
     finalizeFriendship: (other: Address) => write('finalizeFriendship', [other], 'Finalize friendship'),
     matchMe: () => write('matchMe', [], 'Find a match'),
-    depositAndMatchMe: (amount: string) => write('depositAndMatchMe', [parseUsdc(amount)], 'Deposit and find match'),
+    depositAndMatchMe: async (amount: string) => {
+      const value = parseUsdcStrict(amount)
+      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      return write('depositAndMatchMe', [value], 'Deposit and find match')
+    },
     cancelMatchMe: () => write('cancelMatchMe', [], 'Cancel matchmaking'),
     cleanupMyExpiredMatch: () => write('cleanupMyExpiredMatch', [], 'Clear expired match'),
-    setChallengeConfig: (values: { stakeAmt: string; cancelFee: string; rejectFee: string; durationSeconds: string; graceSeconds: string; stealBounty: string; friendshipSuccessFee: string }) => {
-      const stakeAmt = parseUsdc(values.stakeAmt)
-      const cancelFee = parseUsdc(values.cancelFee)
-      const rejectFee = parseUsdc(values.rejectFee)
-      const challengeDuration = BigInt(Math.floor(Number(values.durationSeconds || '0')))
-      const stealGracePeriod = BigInt(Math.floor(Number(values.graceSeconds || '0')))
-      const stealBounty = parseUsdc(values.stealBounty)
-      const friendshipSuccessFee = parseUsdc(values.friendshipSuccessFee)
+    setChallengeConfig: async (values: { stakeAmt: string; cancelFee: string; rejectFee: string; durationSeconds: string; graceSeconds: string; stealBounty: string; friendshipSuccessFee: string }) => {
+      const stakeAmt = parseUsdcStrict(values.stakeAmt)
+      const cancelFee = parseUsdcStrict(values.cancelFee)
+      const rejectFee = parseUsdcStrict(values.rejectFee)
+      const stealBounty = parseUsdcStrict(values.stealBounty)
+      const friendshipSuccessFee = parseUsdcStrict(values.friendshipSuccessFee)
+      if (stakeAmt === undefined || cancelFee === undefined || rejectFee === undefined || stealBounty === undefined || friendshipSuccessFee === undefined) {
+        return failValidation(`Check the USDC amounts. ${USDC_AMOUNT_ERROR}`)
+      }
 
-      if (challengeDuration <= 0n) return setTx({ pending: false, label: '', error: 'Challenge duration must be greater than 0 seconds.' })
-      if (stealGracePeriod >= challengeDuration) return setTx({ pending: false, label: '', error: 'Steal grace must be less than challenge duration.' })
-      if (stakeAmt <= 0n) return setTx({ pending: false, label: '', error: 'Stake amount must be greater than 0 USDC.' })
-      if (stealBounty <= stakeAmt) return setTx({ pending: false, label: '', error: 'Steal bounty must be greater than the stake amount.' })
-      if (stealBounty >= stakeAmt * 2n) return setTx({ pending: false, label: '', error: 'Steal bounty must be less than 2x the stake amount.' })
-      if (friendshipSuccessFee >= stakeAmt) return setTx({ pending: false, label: '', error: 'Success fee must be less than the stake amount.' })
+      const challengeDuration = parseIntegerStrict(values.durationSeconds)
+      const stealGracePeriod = parseIntegerStrict(values.graceSeconds)
+      if (challengeDuration === undefined || stealGracePeriod === undefined) {
+        return failValidation(`Check the durations in seconds. ${INTEGER_AMOUNT_ERROR}`)
+      }
+
+      if (challengeDuration <= 0n) return failValidation('Challenge duration must be greater than 0 seconds.')
+      if (stealGracePeriod >= challengeDuration) return failValidation('Steal grace must be less than challenge duration.')
+      if (stakeAmt <= 0n) return failValidation('Stake amount must be greater than 0 USDC.')
+      if (stealBounty <= stakeAmt) return failValidation('Steal bounty must be greater than the stake amount.')
+      if (stealBounty >= stakeAmt * 2n) return failValidation('Steal bounty must be less than 2x the stake amount.')
+      if (friendshipSuccessFee >= stakeAmt) return failValidation('Success fee must be less than the stake amount.')
 
       return write('setChallengeConfig', [
         stakeAmt,
@@ -1527,18 +1555,27 @@ export function useSocialTrust() {
         friendshipSuccessFee,
       ], 'Save challenge settings')
     },
-    setBonusConfig: (values: { payoutBps: string; maxTreasurySpendBps: string; maxBonusPerSuccess: string }) => write('setBonusConfig', [
-      BigInt(values.payoutBps || '0'),
-      BigInt(values.maxTreasurySpendBps || '0'),
-      parseUsdc(values.maxBonusPerSuccess),
-    ], 'Save bonus settings'),
-    setScore: (userAddress: string, score: string) => {
-      if (!isAddressLike(userAddress)) return setTx({ pending: false, label: '', error: 'Enter a valid wallet address.' })
-      return write('setScore', [userAddress, BigInt(score || '0')], 'Set reputation score')
+    setBonusConfig: async (values: { payoutBps: string; maxTreasurySpendBps: string; maxBonusPerSuccess: string }) => {
+      const payoutBps = parseIntegerStrict(values.payoutBps)
+      const maxTreasurySpendBps = parseIntegerStrict(values.maxTreasurySpendBps)
+      if (payoutBps === undefined || maxTreasurySpendBps === undefined) {
+        return failValidation(`Check the basis-point values. ${INTEGER_AMOUNT_ERROR}`)
+      }
+
+      const maxBonusPerSuccess = parseUsdcStrict(values.maxBonusPerSuccess)
+      if (maxBonusPerSuccess === undefined) return failValidation(`Check the max bonus. ${USDC_AMOUNT_ERROR}`)
+
+      return write('setBonusConfig', [payoutBps, maxTreasurySpendBps, maxBonusPerSuccess], 'Save bonus settings')
+    },
+    setScore: async (userAddress: string, score: string) => {
+      if (!isAddressLike(userAddress)) return failValidation('Enter a valid wallet address.')
+      const value = parseIntegerStrict(score)
+      if (value === undefined) return failValidation(`Check the reputation score. ${INTEGER_AMOUNT_ERROR}`)
+      return write('setScore', [userAddress, value], 'Set reputation score')
     },
     setProfile: async (values: { displayName: string; xUsername: string; telegramUsername: string; discordUsername: string; imgUrl: string }) => {
-      if (!account) return setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
-      if (!appConfig.hasProfiles) return setTx({ pending: false, label: '', error: 'Set VITE_PROFILES_ADDRESS before editing profiles.' })
+      if (!account) return failValidation('Connect your wallet first.')
+      if (!appConfig.hasProfiles) return failValidation('Set VITE_PROFILES_ADDRESS before editing profiles.')
 
       const displayName = normalizeProfileField('displayName', values.displayName)
       const xUsername = normalizeProfileField('xUsername', values.xUsername)
@@ -1556,12 +1593,12 @@ export function useSocialTrust() {
         ['imgUrl', imgUrl],
       ] as const) {
         const error = validateProfileField(field, value)
-        if (error) return setTx({ pending: false, label: '', error })
+        if (error) return failValidation(error)
       }
 
       return write('setProfile', [displayName, xUsername, telegramUsername, discordUsername, imgUrl], 'Save profile')
     },
-  }), [account, write])
+  }), [account, failValidation, write])
 
   return {
     account,

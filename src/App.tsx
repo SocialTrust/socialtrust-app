@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Address } from 'viem'
 import { ArrowLeft, Pencil, Plus, RefreshCw } from 'lucide-react'
-import { NOT_LOADED, formatUsdc, formatUsdcOrDash } from './lib/format'
+import { NOT_LOADED, formatUsdcOrDash } from './lib/format'
+import { formatUsdcPlain } from './lib/amount'
 import { parseRoute, tabForRoute } from './lib/routes'
 import { appConfig } from './lib/config'
 import type { ChallengeView } from './types'
@@ -106,7 +107,9 @@ function App() {
   const accept = (challenge: ChallengeView) => {
     const appBalance = snapshot?.appBalance ?? 0n
     const missingStake = challenge.stakeAmount > appBalance ? challenge.stakeAmount - appBalance : 0n
-    if (missingStake > 0n) return actions.depositAndStakeForFriendship(challenge.other, formatUsdc(missingStake))
+    // The plain form round-trips through the strict parser; formatUsdc groups
+    // thousands and would be rejected.
+    if (missingStake > 0n) return actions.depositAndStakeForFriendship(challenge.other, formatUsdcPlain(missingStake))
     return actions.stakeForFriendship(challenge.other)
   }
   const reject = (challenge: ChallengeView) => actions.rejectPendingStake(challenge.other)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { UserSnapshot } from '../types'
-import { formatUsdc, parseUsdc } from '../lib/format'
+import { formatUsdc } from '../lib/format'
+import { formatUsdcPlain, parseUsdcStrict } from '../lib/amount'
 import { appConfig } from '../lib/config'
 import { Sheet } from './Sheet'
 
@@ -28,11 +29,13 @@ export function WalletSheet({ open, snapshot, initialTab = 'deposit', onClose, o
     }
   }, [open, initialTab])
 
-  const amountUnits = useMemo(() => parseUsdc(amount), [amount])
+  // undefined means the text is not a valid amount, which is different from
+  // zero: the action stays disabled rather than submitting a silent 0.
+  const amountUnits = useMemo(() => parseUsdcStrict(amount), [amount])
   const appBalance = snapshot?.appBalance ?? 0n
   const balance = tab === 'deposit' ? snapshot?.walletUsdc ?? 0n : appBalance
-  const validAmount = amountUnits > 0n && amountUnits <= balance
-  const needsApproval = tab === 'deposit' && amountUnits > 0n && (snapshot?.allowance ?? 0n) < amountUnits
+  const validAmount = amountUnits !== undefined && amountUnits > 0n && amountUnits <= balance
+  const needsApproval = tab === 'deposit' && amountUnits !== undefined && amountUnits > 0n && (snapshot?.allowance ?? 0n) < amountUnits
 
   const entered = amount.trim()
   const actionLabel = submitting
@@ -120,10 +123,10 @@ export function WalletSheet({ open, snapshot, initialTab = 'deposit', onClose, o
         <div className="quickChips">
           {QUICK_AMOUNTS.map((quick) => (
             <button key={quick} className="quickChip" type="button" onClick={() => setAmount(quick)}>
-              {formatUsdc(parseUsdc(quick), { compact: true })} USDC
+              {formatUsdc(parseUsdcStrict(quick), { compact: true })} USDC
             </button>
           ))}
-          <button className="quickChip" type="button" onClick={() => setAmount(formatUsdc(balance, { truncate: true }))}>Max</button>
+          <button className="quickChip" type="button" onClick={() => setAmount(formatUsdcPlain(balance))}>Max</button>
         </div>
       </div>
     </Sheet>

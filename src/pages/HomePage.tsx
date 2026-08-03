@@ -4,6 +4,7 @@ import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from 
 import type { ProfileFormValues } from '../components/ProfileEditSheet'
 import { challengeSortScore, isAttentionState, getChallengeState } from '../lib/challenges'
 import { countdownUntil, durationLabelOrDash, formatUsdc, formatUsdcOrDash, relativeTime, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
+import { formatUsdcPlain } from '../lib/amount'
 import { ChallengeRow } from '../components/ChallengeRow'
 import { ProfileAvatar, displayNameFor } from '../components/ProfileAvatar'
 
@@ -141,7 +142,7 @@ function MatchmakingHero({
   // "Save handle" until the handle is stored on chain.
   const normalizedHandle = normalizeTelegramHandle(handleInput)
 
-  const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))
+  const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdcPlain(shortfall)))
 
   const tryStartMatching = async () => {
     if (!account || checkingHandle) return
