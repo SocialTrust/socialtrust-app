@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SocialProfile } from '../types'
 import { Sheet } from './Sheet'
+import { PROFILE_IMAGE_HOST, PROFILE_IMAGE_PATH_PREFIX } from '../lib/profileImage'
 
 export type ProfileFormValues = Pick<SocialProfile, 'displayName' | 'xUsername' | 'telegramUsername' | 'discordUsername' | 'imgUrl'>
 
@@ -110,9 +111,18 @@ export function ProfileEditSheet({ open, loadProfile, onClose, onSave }: Profile
           </div>
           <label>
             <span>Profile image URL</span>
-            <input value={values.imgUrl} onChange={(event) => update('imgUrl', event.target.value)} maxLength={1024} autoCapitalize="none" />
+            <input
+              value={values.imgUrl}
+              onChange={(event) => update('imgUrl', event.target.value)}
+              maxLength={1024}
+              autoCapitalize="none"
+              placeholder={`https://${PROFILE_IMAGE_HOST}${PROFILE_IMAGE_PATH_PREFIX}…`}
+            />
           </label>
-          <p className="finePrint">Usernames are saved without @. Image URL must start with https://. Leave image URL blank to use the default avatar.</p>
+          <p className="finePrint">
+            Usernames are saved without @. The profile image must be an X/Twitter image link starting
+            {' '}https://{PROFILE_IMAGE_HOST}{PROFILE_IMAGE_PATH_PREFIX} — leave it blank to use the default avatar.
+          </p>
           <div className="buttonGrid">
             <button className="secondaryButton" type="button" disabled={submitting} onClick={close}>Cancel</button>
             <button className="primaryButton" type="submit" disabled={submitting || !dirty}>{submitting ? 'Saving…' : 'Save profile'}</button>

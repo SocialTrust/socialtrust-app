@@ -11,7 +11,7 @@ describe('matchmaking Telegram profile update', () => {
       xUsername: 'old_x',
       telegramUsername: 'oldtg',
       discordUsername: 'jamie.discord',
-      imgUrl: 'https://example.com/a.png',
+      imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
       exists: true,
     }
     const freshOnChainProfile = { ...loadedUiSnapshot, xUsername: 'new_x' }
@@ -26,7 +26,7 @@ describe('matchmaking Telegram profile update', () => {
       xUsername: 'new_x',
       telegramUsername: 'newtelegram',
       discordUsername: 'jamie.discord',
-      imgUrl: 'https://example.com/a.png',
+      imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
     })
   })
 

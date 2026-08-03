@@ -8,6 +8,7 @@ import { socialTrustProfilesAbi } from '../contracts/socialTrustProfilesAbi'
 import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchSnapshot, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
 import { appConfig, configuredChain } from '../lib/config'
 import { isAddressLike, parseUsdc, sameAddress, ZERO_ADDRESS } from '../lib/format'
+import { PROFILE_IMAGE_ERROR, isAllowedProfileImageUrl } from '../lib/profileImage'
 import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
 import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
 
@@ -172,8 +173,9 @@ function validateProfileField(field: ProfileField, value: string): string | null
     if (value && !/^[a-z0-9_.]{2,32}$/.test(value)) return 'Discord username must be 2–32 lowercase letters, numbers, underscores, or periods.'
     return null
   }
-  // imgUrl
-  if (value && (!value.startsWith('https://') || /\s/.test(value) || value.length > 1024)) return 'Image URL must be a valid https:// URL without spaces.'
+  // imgUrl. The same predicate gates rendering, so a URL that would be
+  // refused here can never be displayed either.
+  if (!isAllowedProfileImageUrl(value)) return PROFILE_IMAGE_ERROR
   return null
 }
 

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { SocialProfile } from '../types'
 import { shortAddress } from '../lib/format'
+import { profileImageSrc } from '../lib/profileImage'
 
 type ProfileAvatarProps = {
   address?: string
@@ -38,7 +39,10 @@ function initialsFor(address?: string, profile?: SocialProfile) {
 }
 
 export function ProfileAvatar({ address, profile, size = 'md', className = '' }: ProfileAvatarProps) {
-  const imgUrl = profile?.imgUrl?.trim()
+  // Only a URL that would pass the save-time check is rendered. A profile
+  // written before this rule, or by another client, falls back to the
+  // deterministic default avatar rather than fetching from an arbitrary host.
+  const imgUrl = profileImageSrc(profile?.imgUrl)
   const hasImage = Boolean(imgUrl)
   const style = hasImage ? undefined : ({ '--avatarHue': hueFor(address) } as CSSProperties)
 

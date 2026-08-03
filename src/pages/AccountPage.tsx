@@ -15,6 +15,7 @@ import {
 import type { ContractConfig, UserSnapshot } from '../types'
 import { copyText, formatUsdc, shortAddress } from '../lib/format'
 import { appConfig } from '../lib/config'
+import { profileImageSrc } from '../lib/profileImage'
 import { ListRow } from '../components/ListRow'
 import { ProfileAvatar } from '../components/ProfileAvatar'
 
@@ -181,8 +182,9 @@ export function AccountPage({
           <ListRow
             title="Profile image"
             // The avatar already shows a custom image; "Set" beside it says
-            // nothing extra. Only the absence of one needs spelling out.
-            value={profile?.imgUrl?.trim() ? undefined : 'Not set'}
+            // nothing extra. Only the absence of one needs spelling out — and
+            // a stored URL we refuse to render counts as absent.
+            value={profileImageSrc(profile?.imgUrl) ? undefined : 'Not set'}
             trailing={<ProfileAvatar address={account} profile={profile} size="sm" />}
           />
         </div>

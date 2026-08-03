@@ -58,7 +58,7 @@ const savedProfile: SocialProfile = {
   xUsername: 'old_x',
   telegramUsername: 'jamietg',
   discordUsername: 'jamie.discord',
-  imgUrl: 'https://example.com/a.png',
+  imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
   exists: true,
 }
 
@@ -113,7 +113,7 @@ const editedValues = {
   xUsername: 'new_x',
   telegramUsername: 'jamietg',
   discordUsername: 'jamie.discord',
-  imgUrl: 'https://example.com/a.png',
+  imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
 }
 
 describe('useSocialTrust setProfile refresh', () => {

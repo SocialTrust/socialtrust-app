@@ -96,10 +96,10 @@ describe('AccountPage (self control centre)', () => {
   })
 
   it('lets the avatar speak for itself when a custom profile image is set', () => {
-    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://example.com/a.png' } } })
+    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg' } } })
     const row = screen.getByText('Profile image').closest('.listRow')!
     expect(row.querySelector('.listRowValue')).toBeNull()
-    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://example.com/a.png')
+    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://pbs.twimg.com/profile_images/1/a.jpg')
   })
 
   it('says "Not set" when there is no custom profile image', () => {
@@ -107,6 +107,18 @@ describe('AccountPage (self control centre)', () => {
     const row = screen.getByText('Profile image').closest('.listRow')!
     expect(row.querySelector('.listRowValue')?.textContent).toBe('Not set')
     expect(row.querySelector('img')).toBeNull()
+  })
+
+  it('falls back to the default avatar for a stored image outside the allowed host', () => {
+    // A profile written before the restriction, or by another client, must not
+    // make the app fetch from an arbitrary host.
+    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://pbs.twimg.com.evil.com/profile_images/1/a.jpg' } } })
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('img')).toBeNull()
+    expect(row.querySelector('.listRowValue')?.textContent).toBe('Not set')
+    // The identity block avatar makes the same decision.
+    expect(document.querySelector('.profileAvatar-lg img')).toBeNull()
+    expect(document.querySelector('.profileAvatar-lg')?.className).toContain('profileAvatar-empty')
   })
 
   it('hides the allowance row when the allowance already covers a stake', () => {
