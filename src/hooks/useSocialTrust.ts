@@ -511,42 +511,6 @@ export function useSocialTrust() {
     }
   }, [config?.cancelPendingStakeFee, config?.challengeDuration, config?.friendshipSuccessFee, config?.rejectPendingStakeFee, config?.stealBounty, config?.stealGracePeriod, toBigIntValue])
 
-  const normalizeChallengeView = useCallback((value: unknown, user: Address): ChallengeView | undefined => {
-    const challenge = value as Record<string, unknown> & Record<number, unknown>
-    const pairKey = (challenge.pairKey ?? challenge[0]) as ChallengeView['pairKey'] | undefined
-    const account0 = (challenge.account0 ?? challenge[1]) as Address | undefined
-    const account1 = (challenge.account1 ?? challenge[2]) as Address | undefined
-
-    if (!pairKey || !account0 || !account1 || sameAddress(account0, ZERO_ADDRESS)) return undefined
-
-    const otherFromView = (challenge.other ?? challenge[3]) as Address | undefined
-    const userIs0 = sameAddress(user, account0)
-    const userIs1 = sameAddress(user, account1)
-    const other = otherFromView && !sameAddress(otherFromView, ZERO_ADDRESS)
-      ? otherFromView
-      : userIs0 ? account1 : userIs1 ? account0 : ZERO_ADDRESS
-
-    return {
-      pairKey,
-      account0,
-      account1,
-      other,
-      stakeAmount: toBigIntValue(challenge.stakeAmount ?? challenge[4]),
-      cancelPendingStakeFee: toBigIntValue(challenge.cancelPendingStakeFee ?? challenge[5] ?? config?.cancelPendingStakeFee),
-      rejectPendingStakeFee: toBigIntValue(challenge.rejectPendingStakeFee ?? challenge[6] ?? config?.rejectPendingStakeFee),
-      challengeDuration: toBigIntValue(challenge.challengeDuration ?? challenge[7] ?? config?.challengeDuration),
-      stealGracePeriod: toBigIntValue(challenge.stealGracePeriod ?? challenge[8] ?? config?.stealGracePeriod),
-      stealBounty: toBigIntValue(challenge.stealBounty ?? challenge[9] ?? config?.stealBounty),
-      friendshipSuccessFee: toBigIntValue(challenge.friendshipSuccessFee ?? challenge[10] ?? config?.friendshipSuccessFee),
-      userStaked: Boolean(challenge.userStaked ?? challenge[11] ?? false),
-      otherStaked: Boolean(challenge.otherStaked ?? challenge[12] ?? false),
-      active: Boolean(challenge.active ?? challenge[13] ?? false),
-      challengeStartedAt: toBigIntValue(challenge.challengeStartedAt ?? challenge[14]),
-      stealAllowedAt: toBigIntValue(challenge.stealAllowedAt ?? challenge[15]),
-      challengeEndsAt: toBigIntValue(challenge.challengeEndsAt ?? challenge[16]),
-    }
-  }, [config?.cancelPendingStakeFee, config?.challengeDuration, config?.friendshipSuccessFee, config?.rejectPendingStakeFee, config?.stealBounty, config?.stealGracePeriod, toBigIntValue])
-
   const normalizeGraphChallenge = useCallback((participant: GraphChallengeParticipant, user: Address): ChallengeView | undefined => {
     const challenge = participant.challenge
     if (!challenge || !challenge.account0 || !challenge.account1) return undefined
@@ -605,11 +569,17 @@ export function useSocialTrust() {
     return normalizeGraphAccountData(data, user)
   }, [normalizeGraphAccountData])
 
+  // Targeted post-transaction verification for one pair. The deployed contract
+  // has no aggregate view function: it exposes the public pairChallenges
+  // mapping getter, so read that and derive the view locally. A pair that never
+  // existed — or whose challenge was deleted on finalize, steal, cancel, or
+  // reject — comes back zeroed, and normalizePairChallenge returns undefined
+  // for it, which is how callers know to drop it from the snapshot.
   const readChallengeViewForOther = useCallback(async (user: Address, other: Address): Promise<ChallengeView | undefined> => {
     const key = await readContract<ChallengeView['pairKey']>('pairKey', [user, other])
-    const view = await readContract<unknown>('getChallengeView', [key, user])
-    return normalizeChallengeView(view, user)
-  }, [normalizeChallengeView, readContract])
+    const challenge = await readContract<unknown>('pairChallenges', [key])
+    return normalizePairChallenge(key, challenge, user)
+  }, [normalizePairChallenge, readContract])
 
 
   const emptySocialProfile = useMemo<SocialProfile>(() => ({
