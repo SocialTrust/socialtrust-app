@@ -33,13 +33,14 @@ export function isCurrentRequest(
  *
  * This is what stops a failed Graph query from "preserving" the previous
  * wallet's friends, challenges or activity: an empty list for the right
- * account is correct, another account's list never is.
+ * account is correct, another account's list never is. It is also what the
+ * hook applies during render, so a disconnected `user` yields nothing.
  */
 export function ownedSnapshot<T>(
   snapshot: T | undefined,
   owner: Address | undefined,
-  user: Address,
+  user: Address | undefined,
 ): T | undefined {
-  if (!snapshot || !owner || !sameAddress(owner, user)) return undefined
+  if (!snapshot || !owner || !user || !sameAddress(owner, user)) return undefined
   return snapshot
 }

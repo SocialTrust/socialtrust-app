@@ -430,6 +430,19 @@ export function useSocialTrust() {
   accountRef.current = account
   const graphPollSeqRef = useRef(0)
   const isConnected = wagmiIsConnected || appConfig.isMockMode
+
+  /**
+   * The snapshot as this render may use it: the stored one only when its
+   * recorded owner is the account connected *right now*.
+   *
+   * Clearing in an effect is one render too late. On the first render after a
+   * switch, `account` is already B while `snapshot` still holds A's balances,
+   * friends, challenges and activity, and that render is committed to the DOM
+   * before any effect runs. Deriving here closes that window: the ref and the
+   * state are always written together, so this stays consistent with both.
+   */
+  const ownedSnapshotForRender = ownedSnapshot(snapshot, snapshotAccountRef.current, account)
+
   const isOwner = Boolean(account && config?.owner && sameAddress(account, config.owner))
   const wrongNetwork = Boolean(!appConfig.isMockMode && isConnected && typeof chainId === 'number' && chainId !== appConfig.chainId)
 
@@ -1055,13 +1068,13 @@ export function useSocialTrust() {
   // Another account can complete the match, so queued users follow Base's head.
   // Recursive timeouts ensure slow RPC calls never overlap.
   useEffect(() => {
-    if (!account || !snapshot?.currentQueueEntry || appConfig.isMockMode) return
+    if (!account || !ownedSnapshotForRender?.currentQueueEntry || appConfig.isMockMode) return
     const pollingAccount = account
     return startMatchPolling({
       shouldContinue: () => Boolean(accountRef.current && sameAddress(accountRef.current, pollingAccount) && matchSnapshotRef.current?.currentQueueEntry),
       poll: async () => { await refreshMatchStateOnly(pollingAccount) },
     })
-  }, [account, Boolean(snapshot?.currentQueueEntry), refreshMatchStateOnly])
+  }, [account, Boolean(ownedSnapshotForRender?.currentQueueEntry), refreshMatchStateOnly])
 
   // Do not auto-request a network switch on route changes.
   // Mobile WalletConnect wallets can briefly report an unknown/wrong chain while pages remount,
@@ -1136,9 +1149,9 @@ export function useSocialTrust() {
         isFriendWithViewer = await readContract<boolean>('areFriends', [account, profileAddress])
         relationshipChallenge = challenges.find((challenge) => sameAddress(challenge.other, account))
       } else {
-        appBalance = snapshot?.appBalance ?? await readContract<bigint>('balances', [profileAddress])
-        walletUsdc = snapshot?.walletUsdc ?? (appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? 0n : await readErc20<bigint>('balanceOf', [profileAddress]))
-        allowance = snapshot?.allowance ?? (appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? 0n : await readErc20<bigint>('allowance', [profileAddress, appConfig.contractAddress]))
+        appBalance = ownedSnapshotForRender?.appBalance ?? await readContract<bigint>('balances', [profileAddress])
+        walletUsdc = ownedSnapshotForRender?.walletUsdc ?? (appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? 0n : await readErc20<bigint>('balanceOf', [profileAddress]))
+        allowance = ownedSnapshotForRender?.allowance ?? (appConfig.usdcAddress.toLowerCase() === ZERO_ADDRESS ? 0n : await readErc20<bigint>('allowance', [profileAddress, appConfig.contractAddress]))
       }
     }
 
@@ -1161,7 +1174,7 @@ export function useSocialTrust() {
       friendProfiles,
       friendRepScores,
     }
-  }, [account, readContract, readErc20, readGraphState, readSocialProfile, readSocialProfiles, snapshot])
+  }, [account, ownedSnapshotForRender, readContract, readErc20, readGraphState, readSocialProfile, readSocialProfiles])
 
   const ensureUsdcAllowance = useCallback(async (amount: bigint) => {
     if (!walletClient || !account) throw new Error('Connect your wallet first.')
@@ -1645,7 +1658,7 @@ export function useSocialTrust() {
     isOwner,
     wrongNetwork,
     config,
-    snapshot,
+    snapshot: ownedSnapshotForRender,
     activityError,
     tx,
     connect,
