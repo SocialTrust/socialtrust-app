@@ -13,7 +13,7 @@ const withTelegram: SocialProfile = {
   xUsername: 'jamie_x',
   telegramUsername: 'jamietg',
   discordUsername: 'jamie.discord',
-  imgUrl: 'https://example.com/a.png',
+  imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
   exists: true,
 }
 

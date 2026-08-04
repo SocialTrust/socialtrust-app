@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, ScanLine } from 'lucide-react'
+import { Check, Copy, QrCode, ScanLine } from 'lucide-react'
 import jsQR from 'jsqr'
 import { QRCodeSVG } from 'qrcode.react'
-import type { ContractConfig, UserSnapshot } from '../types'
-import { copyText, formatUsdc, isAddressLike, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
+import type { Address } from 'viem'
+import type { ContractConfig, SocialProfile, UserSnapshot } from '../types'
+import { copyText, formatUsdc, formatUsdcOrDash, isAddressLike, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
+import { formatUsdcPlain } from '../lib/amount'
 import { Sheet } from './Sheet'
+import { ProfileAvatar, displayNameFor } from './ProfileAvatar'
 
 type StartFriendshipSheetProps = {
   open: boolean
@@ -17,6 +20,10 @@ type StartFriendshipSheetProps = {
   onConnect: () => void
   onStake: (other: string) => Promise<boolean>
   onDepositAndStake: (other: string, amount: string) => Promise<boolean>
+  /** Optional identity lookup for the entered/scanned account. */
+  readSocialProfile?: (account: Address) => Promise<SocialProfile>
+  /** Fired after a confirmed submission, just before the sheet closes. */
+  onSubmitted?: () => void
 }
 
 type ScanState = 'idle' | 'starting' | 'active' | 'scanned' | 'error'
@@ -29,12 +36,26 @@ function extractAddress(payload: string): string | undefined {
   return isAddressLike(candidate) ? candidate : undefined
 }
 
-export function StartFriendshipSheet({ open, initialOther, account, config, snapshot, isConnected, onClose, onConnect, onStake, onDepositAndStake }: StartFriendshipSheetProps) {
+export function StartFriendshipSheet({
+  open,
+  initialOther,
+  account,
+  config,
+  snapshot,
+  isConnected,
+  onClose,
+  onConnect,
+  onStake,
+  onDepositAndStake,
+  readSocialProfile,
+  onSubmitted,
+}: StartFriendshipSheetProps) {
   const [tab, setTab] = useState<'scan' | 'show'>('scan')
   const [scanState, setScanState] = useState<ScanState>('idle')
   const [other, setOther] = useState(initialOther ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [otherProfile, setOtherProfile] = useState<SocialProfile | undefined>()
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -44,6 +65,8 @@ export function StartFriendshipSheet({ open, initialOther, account, config, snap
   // the tab switched must not attach its (still live) stream.
   const camGenRef = useRef(0)
   const copiedTimerRef = useRef<number | undefined>(undefined)
+  // Guards a slow identity read from landing on a different address.
+  const profileSeqRef = useRef(0)
 
   const stopCamera = () => {
     camGenRef.current += 1
@@ -109,6 +132,8 @@ export function StartFriendshipSheet({ open, initialOther, account, config, snap
       setTab('scan')
       setScanState('idle')
       setCopied(false)
+      setOtherProfile(undefined)
+      profileSeqRef.current += 1
     }
   }, [initialOther, open])
 
@@ -121,25 +146,43 @@ export function StartFriendshipSheet({ open, initialOther, account, config, snap
   const appBalance = snapshot?.appBalance ?? 0n
   const missingStake = stake > appBalance ? stake - appBalance : 0n
   const hasEnough = Boolean(snapshot && appBalance >= stake)
+  // Without the on-chain stake there is no correct deposit amount to compute,
+  // so the action waits rather than submitting against a zero placeholder.
+  const termsLoading = !config
   const otherValid = useMemo(() => isAddressLike(other) && !sameAddress(other, account), [other, account])
+  const isSelf = useMemo(() => isAddressLike(other) && sameAddress(other, account), [other, account])
 
-  const submitStake = async () => {
-    if (submitting) return
-    setSubmitting(true)
-    try {
-      const success = await onStake(other)
-      if (success) onClose()
-    } finally {
-      setSubmitting(false)
+  // Identity preview for a valid counterparty. Display-only, so a failed read
+  // falls back to the address instead of blocking the flow.
+  useEffect(() => {
+    if (!open || !otherValid || !readSocialProfile) {
+      setOtherProfile(undefined)
+      return
     }
-  }
+    const target = other.trim() as Address
+    const seq = ++profileSeqRef.current
+    readSocialProfile(target)
+      .then((profile) => {
+        if (seq !== profileSeqRef.current) return
+        setOtherProfile(profile)
+      })
+      .catch(() => {
+        if (seq !== profileSeqRef.current) return
+        setOtherProfile(undefined)
+      })
+  }, [open, other, otherValid, readSocialProfile])
 
-  const submitDepositAndStake = async () => {
-    if (submitting) return
+  const submit = async () => {
+    if (submitting || !otherValid || termsLoading) return
     setSubmitting(true)
     try {
-      const success = await onDepositAndStake(other, formatUsdc(missingStake))
-      if (success) onClose()
+      const success = hasEnough
+        ? await onStake(other)
+        : await onDepositAndStake(other, formatUsdcPlain(missingStake))
+      if (success) {
+        onSubmitted?.()
+        onClose()
+      }
     } finally {
       setSubmitting(false)
     }
@@ -153,61 +196,101 @@ export function StartFriendshipSheet({ open, initialOther, account, config, snap
     copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1400)
   }
 
-  const actionBlock = (
-    <>
-      <button
-        className="trustButton full"
-        disabled={!otherValid || submitting}
-        onClick={hasEnough ? submitStake : submitDepositAndStake}
-      >
-        {submitting ? 'Confirming…' : hasEnough ? `Stake ${formatUsdc(stake)} USDC` : `Deposit ${formatUsdc(missingStake)} & stake`}
-      </button>
-      {hasEnough ? (
-        <p className="sheetCaption">
-          {secondsToLabel(config?.challengeDuration)} challenge · Balance: <span className="captionBalance">$ {formatUsdc(appBalance, { compact: true })}</span>
-        </p>
-      ) : (
-        <p className="sheetCaption">Deposits {formatUsdc(missingStake)} USDC from your wallet to cover the stake.</p>
-      )}
-    </>
-  )
+  const summary = otherValid ? (
+    <div className="startSummary">
+      <div className="startSummaryIdentity">
+        <ProfileAvatar address={other} profile={otherProfile} size="sm" />
+        <span className="startSummaryName">
+          <strong>{displayNameFor(other, otherProfile)}</strong>
+          <small>{shortAddress(other, 6)}</small>
+        </span>
+      </div>
+      <dl className="factList">
+        <div><dt>Stake required</dt><dd>{termsLoading ? formatUsdcOrDash(undefined) : `${formatUsdc(stake)} USDC`}</dd></div>
+        <div><dt>Challenge length</dt><dd>{secondsToLabelOrDash(config?.challengeDuration)}</dd></div>
+        <div><dt>Your app balance</dt><dd>{formatUsdc(appBalance)} USDC</dd></div>
+        {hasEnough || termsLoading ? null : (
+          <div><dt>Deposit needed</dt><dd>{formatUsdc(missingStake)} USDC from your wallet</dd></div>
+        )}
+      </dl>
+    </div>
+  ) : null
 
   const addressField = (
-    <label>
-      <span className={initialOther ? undefined : 'pasteLabel'}>{initialOther ? 'Friend address' : 'Or paste their address'}</span>
-      <input value={other} onChange={(event) => setOther(event.target.value)} placeholder="0x..." />
+    <label className="fieldLabel">
+      <span>{initialOther ? 'Their wallet address' : 'Or paste their wallet address'}</span>
+      <input
+        value={other}
+        onChange={(event) => setOther(event.target.value)}
+        placeholder="0x..."
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      {isSelf ? <small className="fieldError">You cannot start a friendship with your own account.</small> : null}
     </label>
   )
 
+  const footer = isConnected ? (
+    <>
+      <button className="primaryButton full" type="button" disabled={!otherValid || submitting || termsLoading} onClick={submit}>
+        {submitting
+          ? 'Confirming…'
+          : termsLoading
+            ? 'Loading terms…'
+            : hasEnough ? `Stake ${formatUsdc(stake)} USDC` : `Deposit ${formatUsdc(missingStake)} USDC & stake`}
+      </button>
+      <p className="footerCaption">
+        {termsLoading
+          ? 'Reading the current stake and challenge length from the contract.'
+          : hasEnough
+            ? `${secondsToLabelOrDash(config?.challengeDuration)} challenge · app balance ${formatUsdc(appBalance)} USDC`
+            : `Deposits ${formatUsdc(missingStake)} USDC from your wallet to cover the stake.`}
+      </p>
+    </>
+  ) : null
+
+  const scanning = scanState === 'starting' || scanState === 'active'
+
   return (
-    <Sheet open={open} title="Start friendship" onClose={onClose}>
+    <Sheet
+      open={open}
+      title="Start friendship"
+      description="Stake with someone you know to begin a friendship challenge."
+      onClose={onClose}
+      busy={submitting}
+      fullScreen={scanning}
+      footer={footer}
+    >
       {!isConnected ? (
-        <div className="emptyState inset">
+        <div className="sheetEmpty">
           <h3>Connect first</h3>
           <p>You need a wallet to start a friendship challenge.</p>
-          <button className="primaryButton" onClick={onConnect}>Connect wallet</button>
+          <button className="primaryButton full" type="button" onClick={onConnect}>Connect wallet</button>
         </div>
       ) : initialOther ? (
         <div className="formStack">
           {addressField}
-          {actionBlock}
+          {summary}
         </div>
       ) : (
         <div className="formStack">
           <div className="segmentedControl">
             <button
               className={`segmentedOption ${tab === 'scan' ? 'active' : ''}`}
+              type="button"
               aria-pressed={tab === 'scan'}
               onClick={() => switchTab('scan')}
             >
-              Scan their code
+              <ScanLine size={15} aria-hidden="true" /> Scan their code
             </button>
             <button
               className={`segmentedOption ${tab === 'show' ? 'active' : ''}`}
+              type="button"
               aria-pressed={tab === 'show'}
               onClick={() => switchTab('show')}
             >
-              Show mine
+              <QrCode size={15} aria-hidden="true" /> Show my code
             </button>
           </div>
 
@@ -215,41 +298,46 @@ export function StartFriendshipSheet({ open, initialOther, account, config, snap
             <>
               {scanState === 'scanned' ? (
                 <div className="scanArea scanAreaDone">
-                  <Check size={20} />
+                  <Check size={20} aria-hidden="true" />
                   <span>{shortAddress(other)}</span>
+                  <button className="linkButton" type="button" onClick={() => { setScanState('idle'); setOther('') }}>Scan another</button>
                 </div>
-              ) : scanState === 'starting' || scanState === 'active' ? (
+              ) : scanning ? (
                 <div className="scanArea scanAreaActive">
                   <video ref={videoRef} className="scanVideo" playsInline muted autoPlay />
+                  <button className="ghostButton small scanStop" type="button" onClick={() => { stopCamera(); setScanState('idle') }}>
+                    Stop camera
+                  </button>
                 </div>
               ) : (
                 <button type="button" className="scanArea" onClick={startCamera}>
-                  <ScanLine size={30} />
-                  <span>Tap to scan their QR</span>
+                  <ScanLine size={28} aria-hidden="true" />
+                  <span>Tap to scan their QR code</span>
                 </button>
               )}
-              {scanState === 'error' ? <p className="scanHint">Camera unavailable — paste the address below instead.</p> : null}
+              {scanState === 'error' ? <p className="fieldError">Camera unavailable — paste the address below instead.</p> : null}
 
               {addressField}
-              {actionBlock}
+              {summary}
             </>
           ) : (
             <div className="qrPanel">
               <div className="qrCard">
-                <QRCodeSVG value={account ?? ''} size={168} />
+                <QRCodeSVG value={account ?? ''} size={172} />
               </div>
               <div className="qrAddressRow">
-                <span>{shortAddress(account)}</span>
+                <span>{shortAddress(account, 6)}</span>
                 <button
                   className={`copyIconButton ${copied ? 'copied' : ''}`}
+                  type="button"
                   onClick={handleCopy}
                   aria-label={copied ? 'Address copied' : 'Copy address'}
                   title={copied ? 'Copied' : 'Copy address'}
                 >
-                  {copied ? <span>✓ Copied</span> : <Copy size={14} />}
+                  {copied ? <span>✓ Copied</span> : <Copy size={15} />}
                 </button>
               </div>
-              <p className="sheetCaption qrCaption">Have your friend scan this to stake toward you. You'll get an invite to stake back.</p>
+              <p className="quietCaption">Have them scan this to stake toward you. You will get an invite to stake back.</p>
             </div>
           )}
         </div>

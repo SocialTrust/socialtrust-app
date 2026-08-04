@@ -10,7 +10,7 @@ const profile: SocialProfile = {
   xUsername: 'old_x',
   telegramUsername: 'jamietg',
   discordUsername: 'jamie.discord',
-  imgUrl: 'https://example.com/a.png',
+  imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
   exists: true,
 }
 
@@ -29,7 +29,7 @@ describe('ProfileEditSheet', () => {
     expect(await screen.findByDisplayValue('Jamie')).toBeTruthy()
     expect(screen.getByDisplayValue('old_x')).toBeTruthy()
     expect(screen.getByDisplayValue('jamietg')).toBeTruthy()
-    expect(screen.getByDisplayValue('https://example.com/a.png')).toBeTruthy()
+    expect(screen.getByDisplayValue('https://pbs.twimg.com/profile_images/1/a.jpg')).toBeTruthy()
     expect(screen.queryByText(/Discord/i)).toBeNull()
     expect((screen.getByRole('button', { name: 'Save profile' }) as HTMLButtonElement).disabled).toBe(true)
   })
@@ -45,7 +45,7 @@ describe('ProfileEditSheet', () => {
       xUsername: 'new_x',
       telegramUsername: 'jamietg',
       discordUsername: 'jamie.discord',
-      imgUrl: 'https://example.com/a.png',
+      imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg',
     })
   })
 

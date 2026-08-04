@@ -1,21 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Address } from 'viem'
-import { formatUsdc, isAddressLike } from './lib/format'
+import { ArrowLeft, Pencil, Plus, RefreshCw } from 'lucide-react'
+import { NOT_LOADED, formatUsdcOrDash } from './lib/format'
+import { formatUsdcPlain } from './lib/amount'
+import { parseRoute, tabForRoute } from './lib/routes'
+import { appConfig } from './lib/config'
 import type { ChallengeView } from './types'
 import { useSocialTrust } from './hooks/useSocialTrust'
 import { useLiveNow } from './hooks/useLiveNow'
 import { HomePage } from './pages/HomePage'
+import { FriendsPage } from './pages/FriendsPage'
+import { ActivityPage } from './pages/ActivityPage'
 import { AccountPage } from './pages/AccountPage'
+import { PublicProfilePage } from './pages/PublicProfilePage'
+import { BottomNav } from './components/BottomNav'
+import { TopBar } from './components/TopBar'
 import { StartFriendshipSheet } from './components/StartFriendshipSheet'
 import { WalletSheet } from './components/WalletSheet'
 import { ChallengeDetailSheet } from './components/ChallengeDetailSheet'
 import { AdminSheet } from './components/AdminSheet'
-import { Toast } from './components/Toast'
-import { MainMenuSheet } from './components/MainMenuSheet'
-import { MoreHorizontal } from 'lucide-react'
-import { ProfileAvatar } from './components/ProfileAvatar'
-import { ProfilePopover } from './components/ProfilePopover'
 import { ProfileEditSheet } from './components/ProfileEditSheet'
+import { ShareProfileSheet } from './components/ShareProfileSheet'
+import { TermsSheet } from './components/TermsSheet'
+import { Toast } from './components/Toast'
+import { ProfileAvatar } from './components/ProfileAvatar'
 
 function getPath() {
   return window.location.pathname || '/'
@@ -24,16 +32,17 @@ function getPath() {
 function App() {
   const {
     account,
-    connectedWallet,
     isConnected,
-    isMockMode,
     isLoading,
     isOwner,
+    wrongNetwork,
     config,
     snapshot,
+    activityError,
     tx,
     connect,
     disconnect,
+    switchToAppNetwork,
     refresh,
     readAccountProfile,
     readSocialProfile,
@@ -45,10 +54,11 @@ function App() {
   const [startOpen, setStartOpen] = useState(false)
   const [startOther, setStartOther] = useState<string | undefined>()
   const [walletOpen, setWalletOpen] = useState(false)
+  const [walletTab, setWalletTab] = useState<'deposit' | 'withdraw'>('deposit')
   const [adminOpen, setAdminOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
   const [profileEditOpen, setProfileEditOpen] = useState(false)
+  const [qrOpen, setQrOpen] = useState(false)
+  const [termsOpen, setTermsOpen] = useState(false)
   const [selectedChallengeKey, setSelectedChallengeKey] = useState<ChallengeView['pairKey'] | undefined>()
   const nowSeconds = useLiveNow()
 
@@ -58,21 +68,18 @@ function App() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  const navigate = (to: string) => {
+  const navigate = useCallback((to: string) => {
+    if (to === (window.location.pathname || '/')) {
+      window.scrollTo({ top: 0 })
+      return
+    }
     window.history.pushState({}, '', to)
     setPath(to)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
+    window.scrollTo({ top: 0 })
+  }, [])
 
-  const route = useMemo(() => {
-    if (path === '/') return { name: 'home' as const }
-    if (path === '/me') return { name: 'me' as const }
-    const match = path.match(/^\/account\/(0x[a-fA-F0-9]{40})$/)
-    if (match && isAddressLike(match[1])) return { name: 'account' as const, address: match[1] as Address }
-    return { name: 'not-found' as const }
-  }, [path])
-
-  const routeAddress = route.name === 'me' ? account : route.name === 'account' ? route.address : undefined
+  const route = useMemo(() => parseRoute(path), [path])
+  const activeTab = tabForRoute(route)
 
   const selectedChallenge = useMemo(() => {
     if (!selectedChallengeKey) return undefined
@@ -83,16 +90,26 @@ function App() {
     if (selectedChallengeKey && snapshot && !selectedChallenge) setSelectedChallengeKey(undefined)
   }, [selectedChallenge, selectedChallengeKey, snapshot])
 
-  const openChallenge = (challenge: ChallengeView) => setSelectedChallengeKey(challenge.pairKey)
+  // A route change closes any open sheet, so Back never lands on a stale modal.
+  useEffect(() => {
+    setStartOpen(false)
+    setWalletOpen(false)
+    setAdminOpen(false)
+    setProfileEditOpen(false)
+    setQrOpen(false)
+    setTermsOpen(false)
+    setSelectedChallengeKey(undefined)
+  }, [path])
 
-  const topBarBalance = formatUsdc(snapshot?.appBalance, { truncate: true })
-  const topBarRep = String(snapshot?.repScore ?? 0n)
+  const openChallenge = (challenge: ChallengeView) => setSelectedChallengeKey(challenge.pairKey)
 
   const finalize = (challenge: ChallengeView) => actions.finalizeFriendship(challenge.other)
   const accept = (challenge: ChallengeView) => {
     const appBalance = snapshot?.appBalance ?? 0n
     const missingStake = challenge.stakeAmount > appBalance ? challenge.stakeAmount - appBalance : 0n
-    if (missingStake > 0n) return actions.depositAndStakeForFriendship(challenge.other, formatUsdc(missingStake))
+    // The plain form round-trips through the strict parser; formatUsdc groups
+    // thousands and would be rejected.
+    if (missingStake > 0n) return actions.depositAndStakeForFriendship(challenge.other, formatUsdcPlain(missingStake))
     return actions.stakeForFriendship(challenge.other)
   }
   const reject = (challenge: ChallengeView) => actions.rejectPendingStake(challenge.other)
@@ -104,113 +121,238 @@ function App() {
     setStartOpen(true)
   }
 
+  const openWallet = (tab: 'deposit' | 'withdraw') => {
+    setWalletTab(tab)
+    setWalletOpen(true)
+  }
+
+  const sheetOpen = startOpen || walletOpen || adminOpen || profileEditOpen || qrOpen || termsOpen || Boolean(selectedChallenge)
+
+  // Stacked, label-free metrics: balance above reputation. Both read as the
+  // placeholder until the snapshot lands — an unread balance is unknown, not
+  // zero — while a genuine 0 balance still prints as 0.00.
+  const balanceText = formatUsdcOrDash(snapshot?.appBalance, { truncate: true })
+  const repText = snapshot ? String(snapshot.repScore) : NOT_LOADED
+
+  const connectedHeaderMetrics = isConnected && account ? (
+    <div className="topBarMetrics">
+      <span className="metric" aria-label={`App balance ${balanceText} USDC`}>
+        <span className="metricSymbol metricSymbolUsdc" aria-hidden="true">$</span>
+        <span className="metricValue">{balanceText}</span>
+      </span>
+      <span className="metric" aria-label={`Reputation ${repText}`}>
+        <span className="metricSymbol metricSymbolRep" aria-hidden="true">★</span>
+        <span className="metricValue">{repText}</span>
+      </span>
+    </div>
+  ) : null
+
+  const header = (() => {
+    if (route.name === 'home') {
+      if (!isConnected || !account) {
+        return (
+          <TopBar
+            left={<span className="brandWordmark">SocialTrust</span>}
+            actions={<button className="walletButton" type="button" onClick={connect}>Connect wallet</button>}
+          />
+        )
+      }
+      return (
+        <TopBar
+          left={
+            <>
+              <button className="avatarButton" type="button" aria-label="Open your account" onClick={() => navigate('/me')}>
+                <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
+              </button>
+              <span className="brandWordmark brandWordmarkCompact">SocialTrust</span>
+            </>
+          }
+          actions={connectedHeaderMetrics}
+        />
+      )
+    }
+
+    if (route.name === 'friends') {
+      return (
+        <TopBar
+          title="Friends"
+          actions={
+            <button
+              className="iconButton"
+              type="button"
+              aria-label="Start friendship"
+              title="Start friendship"
+              onClick={() => startWith(undefined)}
+            >
+              <Plus size={20} aria-hidden="true" />
+            </button>
+          }
+        />
+      )
+    }
+
+    if (route.name === 'activity') {
+      return (
+        <TopBar
+          title="Activity"
+          actions={
+            <button className="iconButton" type="button" aria-label="Refresh activity" title="Refresh activity" onClick={refresh}>
+              <RefreshCw size={18} aria-hidden="true" className={isLoading ? 'spin' : undefined} />
+            </button>
+          }
+        />
+      )
+    }
+
+    if (route.name === 'me') {
+      return (
+        <TopBar
+          title="Account"
+          actions={
+            isConnected && account ? (
+              <button className="iconButton" type="button" aria-label="Edit profile" title="Edit profile" onClick={() => setProfileEditOpen(true)}>
+                <Pencil size={18} aria-hidden="true" />
+              </button>
+            ) : null
+          }
+        />
+      )
+    }
+
+    if (route.name === 'account') {
+      return (
+        <TopBar
+          left={
+            <button
+              className="iconButton"
+              type="button"
+              aria-label="Go back"
+              onClick={() => (window.history.length > 1 ? window.history.back() : navigate('/friends'))}
+            >
+              <ArrowLeft size={20} aria-hidden="true" />
+            </button>
+          }
+          title="Profile"
+        />
+      )
+    }
+
+    return <TopBar left={<span className="brandWordmark">SocialTrust</span>} />
+  })()
+
   return (
-    <main className="appShell">
-      <header className={`topBar ${isConnected && route.name === 'home' ? 'connectedHomeTopBar' : ''}`}>
-        {isConnected && account ? (
-          route.name === 'home' ? (
-            <>
-              <div className="topBarLeft">
-                <button
-                  className="profileButton"
-                  aria-label="Open profile details"
-                  aria-expanded={profileOpen}
-                  onClick={() => setProfileOpen((open) => !open)}
-                >
-                  <ProfileAvatar address={account} profile={snapshot?.socialProfile} size="sm" />
-                </button>
-                <div className="topBarMetrics" aria-label="Account balance and reputation">
-                  <span className="metricLine">
-                    <span className="metricSymbol metricSymbolUsdc" aria-hidden="true">$</span>
-                    <span className="metricValue">{topBarBalance}</span>
-                  </span>
-                  <span className="metricLine">
-                    <span className="metricSymbol metricSymbolRep" aria-hidden="true">{'\u2605\uFE0E'}</span>
-                    <span className="metricValue">{topBarRep}</span>
-                  </span>
-                </div>
-                {profileOpen ? (
-                  <ProfilePopover
-                    account={account}
-                    profile={snapshot?.socialProfile}
-                    onEditProfile={() => setProfileEditOpen(true)}
-                    onClose={() => setProfileOpen(false)}
-                  />
-                ) : null}
-              </div>
-              <div className="topBarRight">
-                <button className="menuDots" aria-label="Open menu" onClick={() => setMenuOpen(true)}><MoreHorizontal size={22} /></button>
-              </div>
-            </>
-          ) : (
-            <>
-              <button className="brandWordmark" onClick={() => navigate('/')}>SocialTrust</button>
-              <div className="topBarRight">
-                <button className="menuDots" aria-label="Open menu" onClick={() => setMenuOpen(true)}><MoreHorizontal size={22} /></button>
-              </div>
-            </>
-          )
-        ) : (
-          <>
-            <button className="brandWordmark" onClick={() => navigate('/')}>SocialTrust</button>
-            <button className="walletButton" onClick={connect}>Connect wallet</button>
-          </>
-        )}
-      </header>
+    <div className="app">
+      {header}
 
-
-      {route.name === 'home' ? (
-        <HomePage
-          account={account}
-          isConnected={isConnected}
-          config={config}
-          snapshot={snapshot}
-          isLoading={isLoading}
-          onConnect={connect}
-          onStartWith={(address) => startWith(address)}
-          onFindMatch={actions.matchMe}
-          onDepositAndMatchMe={actions.depositAndMatchMe}
-          onCancelMatch={actions.cancelMatchMe}
-          readSocialProfile={readSocialProfile}
-          onSetProfile={actions.setProfile}
-          txPending={tx.pending}
-          onOpenChallenge={openChallenge}
-          onFinalize={finalize}
-          onAccept={accept}
-          onReject={reject}
-          onCancel={cancel}
-          onNavigate={navigate}
-          nowSeconds={nowSeconds}
-        />
-      ) : null}
-
-      {route.name === 'me' || route.name === 'account' ? (
-        <AccountPage
-          address={routeAddress}
-          connectedAccount={account}
-          isConnected={isConnected}
-          config={config}
-          readAccountProfile={readAccountProfile}
-          readSocialProfile={readSocialProfile}
-          onConnect={connect}
-          onBackHome={() => navigate('/')}
-          onStartWith={startWith}
-          onOpenChallenge={openChallenge}
-          onOpenWallet={() => setWalletOpen(true)}
-          onOpenAdmin={() => setAdminOpen(true)}
-          onSetProfile={actions.setProfile}
-          onNavigate={navigate}
-          nowSeconds={nowSeconds}
-        />
-      ) : null}
-
-      {route.name === 'not-found' ? (
-        <div className="emptyState pageEmpty">
-          <h1>Page not found</h1>
-          <p>Use / for Home, /me for your account, or /account/0x... for another account.</p>
-          <button className="primaryButton" onClick={() => navigate('/')}>Go home</button>
+      {wrongNetwork ? (
+        <div className="networkBanner" role="status">
+          <span>Your wallet is on the wrong network.</span>
+          <button className="linkButton" type="button" onClick={switchToAppNetwork}>Switch to {appConfig.chainName}</button>
         </div>
       ) : null}
+
+      <main className="appMain">
+        {route.name === 'home' ? (
+          <HomePage
+            account={account}
+            isConnected={isConnected}
+            config={config}
+            snapshot={snapshot}
+            isLoading={isLoading}
+            onConnect={connect}
+            onStartWith={(address) => startWith(address)}
+            onFindMatch={actions.matchMe}
+            onDepositAndMatchMe={actions.depositAndMatchMe}
+            onCancelMatch={actions.cancelMatchMe}
+            readSocialProfile={readSocialProfile}
+            onSetProfile={actions.setProfile}
+            txPending={tx.pending}
+            onOpenChallenge={openChallenge}
+            onFinalize={finalize}
+            onAccept={accept}
+            onReject={reject}
+            onCancel={cancel}
+            onNavigate={navigate}
+            nowSeconds={nowSeconds}
+          />
+        ) : null}
+
+        {route.name === 'friends' ? (
+          <FriendsPage
+            isConnected={isConnected}
+            snapshot={snapshot}
+            isLoading={isLoading}
+            txPending={tx.pending}
+            nowSeconds={nowSeconds}
+            onConnect={connect}
+            onStartFriendship={() => startWith(undefined)}
+            onOpenChallenge={openChallenge}
+            onFinalize={finalize}
+            onAccept={accept}
+            onReject={reject}
+            onCancel={cancel}
+            onNavigate={navigate}
+          />
+        ) : null}
+
+        {route.name === 'activity' ? (
+          <ActivityPage
+            isConnected={isConnected}
+            snapshot={snapshot}
+            isLoading={isLoading}
+            activityError={activityError}
+            nowSeconds={nowSeconds}
+            onConnect={connect}
+            onRetry={refresh}
+            onNavigate={navigate}
+          />
+        ) : null}
+
+        {route.name === 'me' ? (
+          <AccountPage
+            account={account}
+            isConnected={isConnected}
+            isOwner={isOwner}
+            snapshot={snapshot}
+            config={config}
+            wrongNetwork={wrongNetwork}
+            onConnect={connect}
+            onEditProfile={() => setProfileEditOpen(true)}
+            onShowQr={() => setQrOpen(true)}
+            onOpenWallet={openWallet}
+            onOpenAdmin={() => setAdminOpen(true)}
+            onOpenTerms={() => setTermsOpen(true)}
+            onSwitchNetwork={switchToAppNetwork}
+            onDisconnect={disconnect}
+          />
+        ) : null}
+
+        {route.name === 'account' ? (
+          <PublicProfilePage
+            address={route.address}
+            connectedAccount={account}
+            isConnected={isConnected}
+            readAccountProfile={readAccountProfile}
+            onConnect={connect}
+            onStartWith={(address: Address) => startWith(address)}
+            onOpenChallenge={openChallenge}
+            onNavigate={navigate}
+            nowSeconds={nowSeconds}
+          />
+        ) : null}
+
+        {route.name === 'not-found' ? (
+          <div className="pageStack">
+            <section className="emptyPanel">
+              <h2>Page not found</h2>
+              <p>Try Home, Friends, Activity, or Account — or open a profile with /account/0x…</p>
+              <button className="primaryButton full" type="button" onClick={() => navigate('/')}>Go home</button>
+            </section>
+          </div>
+        ) : null}
+      </main>
+
+      <BottomNav activeTab={activeTab} onNavigate={navigate} inactive={sheetOpen} />
 
       <StartFriendshipSheet
         open={startOpen}
@@ -223,11 +365,13 @@ function App() {
         onConnect={connect}
         onStake={actions.stakeForFriendship}
         onDepositAndStake={actions.depositAndStakeForFriendship}
+        readSocialProfile={readSocialProfile}
       />
 
       <WalletSheet
         open={walletOpen}
         snapshot={snapshot}
+        initialTab={walletTab}
         onClose={() => setWalletOpen(false)}
         onDeposit={actions.deposit}
         onWithdraw={actions.withdraw}
@@ -235,6 +379,8 @@ function App() {
 
       <ChallengeDetailSheet
         challenge={selectedChallenge}
+        profile={selectedChallenge ? snapshot?.friendProfiles?.[selectedChallenge.other.toLowerCase()] : undefined}
+        appBalance={snapshot?.appBalance}
         onClose={() => setSelectedChallengeKey(undefined)}
         onFinalize={finalize}
         onAccept={accept}
@@ -248,21 +394,6 @@ function App() {
         nowSeconds={nowSeconds}
       />
 
-
-      <MainMenuSheet
-        open={menuOpen}
-        account={account}
-        isConnected={isConnected}
-        isOwner={isOwner}
-        config={config}
-        onClose={() => setMenuOpen(false)}
-        onConnect={connect}
-        onDisconnect={disconnect}
-        onStart={() => startWith()}
-        onOpenWallet={() => setWalletOpen(true)}
-        onOpenAdmin={() => setAdminOpen(true)}
-      />
-
       <ProfileEditSheet
         open={profileEditOpen}
         loadProfile={() => {
@@ -272,6 +403,10 @@ function App() {
         onClose={() => setProfileEditOpen(false)}
         onSave={actions.setProfile}
       />
+
+      <ShareProfileSheet open={qrOpen} account={account} onClose={() => setQrOpen(false)} />
+
+      <TermsSheet open={termsOpen} config={config} onClose={() => setTermsOpen(false)} />
 
       <AdminSheet
         open={adminOpen}
@@ -283,9 +418,7 @@ function App() {
       />
 
       <Toast tx={tx} onClear={clearTx} />
-
-      <button className="refreshFab" onClick={refresh}>{isLoading ? '…' : '↻'}</button>
-    </main>
+    </div>
   )
 }
 

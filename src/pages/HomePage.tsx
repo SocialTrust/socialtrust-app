@@ -1,14 +1,12 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { Address } from 'viem'
 import type { ChallengeView, ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import type { ProfileFormValues } from '../components/ProfileEditSheet'
-import { challengeSortScore, getChallengeState } from '../lib/challenges'
-import { countdownUntil, formatUsdc, relativeTime, sameAddress, secondsToLabel, shortAddress } from '../lib/format'
-import { ChallengeCard } from '../components/ChallengeCard'
-import { ActivityFeed } from '../components/ActivityFeed'
+import { challengeSortScore, isAttentionState, getChallengeState } from '../lib/challenges'
+import { countdownUntil, durationLabelOrDash, formatUsdc, formatUsdcOrDash, relativeTime, sameAddress, secondsToLabelOrDash, shortAddress } from '../lib/format'
+import { formatUsdcPlain } from '../lib/amount'
+import { ChallengeRow } from '../components/ChallengeRow'
 import { ProfileAvatar, displayNameFor } from '../components/ProfileAvatar'
-
 
 type MatchmakingHeroProps = {
   account?: Address
@@ -87,21 +85,21 @@ function MatchmakingHero({
     const relationshipChallenge = snapshot?.challenges.find((challenge) => sameAddress(challenge.other, partner))
 
     return (
-      <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
-        <span className="matchStatusLine matchStatusTrust">
-          <span className="matchStatusDot" />
-          <span className="matchStatusLabel">Matched</span>
+      <section className="hero" aria-label="Matchmaking">
+        <span className="statusLine statusLineTrust">
+          <span className="statusDot" aria-hidden="true" />
+          Matched
         </span>
-        <h1>You matched with {displayNameFor(partner, snapshot?.matchPartnerProfile)}</h1>
-        <button className="matchPartnerLink" onClick={() => onNavigateAccount(partner)}>
+        <h2>You matched with {displayNameFor(partner, snapshot?.matchPartnerProfile)}</h2>
+        <button className="heroPartner" type="button" onClick={() => onNavigateAccount(partner)}>
           <ProfileAvatar address={partner} profile={snapshot?.matchPartnerProfile} size="sm" />
-          <span className="matchPartnerAddress">{shortAddress(partner)}</span>
+          <span>{shortAddress(partner, 6)}</span>
         </button>
         <p>Become friends before the deadline to get your match fee back.</p>
         {relationshipChallenge ? (
-          <button className="trustButton" disabled={txPending} onClick={() => onOpenChallenge(relationshipChallenge)}>Open challenge</button>
+          <button className="primaryButton full" type="button" disabled={txPending} onClick={() => onOpenChallenge(relationshipChallenge)}>Open challenge</button>
         ) : (
-          <button className="trustButton" disabled={txPending} onClick={() => onStartWith(partner)}>Start friendship</button>
+          <button className="primaryButton full" type="button" disabled={txPending} onClick={() => onStartWith(partner)}>Start friendship</button>
         )}
         <span className="heroCaption">{countdownUntil(activeMatch.deadline, nowSeconds)} left</span>
       </section>
@@ -112,14 +110,14 @@ function MatchmakingHero({
     const cancelFee = queueEntry.cancelFeeAmount ?? config?.matchQueueCancelFee ?? 0n
     const refund = queueEntry.feeAmount > cancelFee ? queueEntry.feeAmount - cancelFee : 0n
     return (
-      <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
-        <span className="matchStatusLine matchStatusWarning">
-          <span className="matchStatusDot" />
-          <span className="matchStatusLabel">Searching</span>
+      <section className="hero" aria-label="Matchmaking">
+        <span className="statusLine statusLineSearching">
+          <span className="statusDot" aria-hidden="true" />
+          Searching
         </span>
-        <h1>Looking for your match…</h1>
+        <h2>Looking for your match…</h2>
         <p>Queued {relativeTime(queueEntry.queuedAt, nowSeconds)}. Your {formatUsdc(queueEntry.feeAmount)} USDC fee is locked while you wait.</p>
-        <button className="secondaryButton" disabled={txPending} onClick={onCancelMatch}>Cancel search</button>
+        <button className="secondaryButton full" type="button" disabled={txPending} onClick={onCancelMatch}>Cancel search</button>
         <span className="heroCaption">Cancelling refunds {formatUsdc(refund)} USDC</span>
       </section>
     )
@@ -129,7 +127,9 @@ function MatchmakingHero({
   const matchFee = config?.matchFee ?? 0n
   const hasEnoughBalance = appBalance >= matchFee
   const shortfall = matchFee > appBalance ? matchFee - appBalance : 0n
-  const days = config?.matchTimeLimit ? `${Math.max(1, Math.round(Number(config.matchTimeLimit) / 86400))} days` : '—'
+  // Natural wording straight from the on-chain window: a ten-minute window
+  // must not round up to a day.
+  const matchWindow = durationLabelOrDash(config?.matchTimeLimit)
 
   // Matching reaches people over Telegram, so entering the queue is gated on a
   // handle being stored on chain. The profiles contract is the only authority
@@ -142,7 +142,7 @@ function MatchmakingHero({
   // "Save handle" until the handle is stored on chain.
   const normalizedHandle = normalizeTelegramHandle(handleInput)
 
-  const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdc(shortfall)))
+  const startMatching = () => (hasEnoughBalance ? onFindMatch() : onDepositAndMatchMe(formatUsdcPlain(shortfall)))
 
   const tryStartMatching = async () => {
     if (!account || checkingHandle) return
@@ -190,19 +190,21 @@ function MatchmakingHero({
   if (profileError) caption = profileError
   else if (savedHandle && !gateOpen) caption = `Saved @${savedHandle} — you're ready to match`
   else if (gateOpen) caption = null
-  else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${days}`
+  // Config still loading: hold the line's space with placeholders instead of
+  // printing a fee and window of zero.
+  else if (!config) caption = `${formatUsdcOrDash(undefined)} USDC fee · ${matchWindow}`
+  else if (hasEnoughBalance) caption = `${formatUsdc(matchFee)} USDC fee · ${matchWindow}`
   else caption = `Deposits ${formatUsdc(shortfall)} USDC from your wallet to cover the fee.`
 
   return (
-    <section className="homeIntroCta matchmakingHero" aria-label="Matchmaking">
-      <h1>Ready to build trust?</h1>
+    <section className="hero" aria-label="Matchmaking">
+      <h2>Ready to build trust?</h2>
       <p>{subtext}</p>
 
       {gateOpen ? (
-        <div className="matchHandleField">
-          <span className="matchHandlePrefix">@</span>
+        <div className="handleField">
+          <span className="handlePrefix" aria-hidden="true">@</span>
           <input
-            className="matchHandleInput"
             value={handleInput}
             onChange={(event) => setHandleInput(event.target.value)}
             placeholder="yourhandle"
@@ -217,12 +219,13 @@ function MatchmakingHero({
       ) : null}
 
       {gateOpen ? (
-        <button className="trustButton" disabled={savingHandle || !normalizedHandle} onClick={saveHandle}>
+        <button className="primaryButton full" type="button" disabled={savingHandle || !normalizedHandle} onClick={saveHandle}>
           Save handle
         </button>
       ) : (
         <button
-          className="trustButton"
+          className="primaryButton full"
+          type="button"
           disabled={txPending || checkingHandle || matchFee === 0n}
           onClick={() => void tryStartMatching()}
         >
@@ -230,62 +233,8 @@ function MatchmakingHero({
         </button>
       )}
 
-      {caption ? <span className="heroCaption">{caption}</span> : null}
-    </section>
-  )
-}
+      {caption ? <span className={`heroCaption ${profileError ? 'heroCaptionError' : ''}`}>{caption}</span> : null}
 
-
-function FriendsSection({
-  friends,
-  friendProfiles,
-  friendRepScores,
-  onNavigate,
-}: {
-  friends: Address[]
-  friendProfiles?: Record<string, SocialProfile>
-  friendRepScores?: Record<string, bigint>
-  onNavigate: (path: string) => void
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const visible = expanded ? friends : friends.slice(0, 4)
-
-  return (
-    <section className="homeSection feedSection friendsHomeSection">
-      <div className="sectionHeader slimHeader">
-        <h2>Friends</h2>
-      </div>
-      {friends.length > 0 ? (
-        <>
-          <div className="friendCardList homeFriendList">
-            {visible.map((friend) => {
-              const friendProfile = friendProfiles?.[friend.toLowerCase()]
-              const friendRep = friendRepScores?.[friend.toLowerCase()] ?? 0n
-              return (
-                <button
-                  className="friendRowCard friendRowTwoLine"
-                  key={friend}
-                  onClick={() => onNavigate(`/account/${friend}`)}
-                  aria-label={`Open ${displayNameFor(friend, friendProfile)}`}
-                >
-                  <ProfileAvatar address={friend} profile={friendProfile} size="sm" />
-                  <span>
-                    <strong>{displayNameFor(friend, friendProfile)}</strong>
-                    <small>Reputation {String(friendRep)}</small>
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          {friends.length > 4 ? (
-            <button className="feedToggle" onClick={() => setExpanded((open) => !open)}>
-              {expanded ? <>Show less <ChevronUp size={15} /></> : <>Show {friends.length - 4} more <ChevronDown size={15} /></>}
-            </button>
-          ) : null}
-        </>
-      ) : (
-        <p className="quietHelperText">No finalized friendships yet.</p>
-      )}
     </section>
   )
 }
@@ -313,44 +262,67 @@ type HomePageProps = {
   nowSeconds: number
 }
 
-export function HomePage({ account, isConnected, config, snapshot, isLoading, onConnect, onStartWith, onFindMatch, onDepositAndMatchMe, onCancelMatch, readSocialProfile, onSetProfile, txPending, onOpenChallenge, onFinalize, onAccept, onReject, onCancel, onNavigate, nowSeconds }: HomePageProps) {
+export function HomePage({
+  account,
+  isConnected,
+  config,
+  snapshot,
+  isLoading,
+  onConnect,
+  onStartWith,
+  onFindMatch,
+  onDepositAndMatchMe,
+  onCancelMatch,
+  readSocialProfile,
+  onSetProfile,
+  txPending,
+  onOpenChallenge,
+  onFinalize,
+  onAccept,
+  onReject,
+  onCancel,
+  onNavigate,
+  nowSeconds,
+}: HomePageProps) {
   const challenges = [...(snapshot?.challenges ?? [])].sort((a, b) => challengeSortScore(a, nowSeconds) - challengeSortScore(b, nowSeconds))
-  const feedItems = challenges.filter((challenge) => getChallengeState(challenge, nowSeconds) !== 'unknown')
+  // Only states that actually need the user: an active-safe challenge is
+  // progressing normally and lives under Friends -> In progress.
+  const attention = challenges.filter((challenge) => isAttentionState(getChallengeState(challenge, nowSeconds)))
 
   if (!isConnected) {
     return (
-      <div className="landingStack">
-        <section className="landingHero panelCard">
+      <div className="pageStack">
+        <section className="hero landingHero">
           <span className="eyebrow">SocialTrust</span>
-          <h1>Build trust with real stakes.</h1>
+          <h2>Build trust with real stakes.</h2>
           <p>Stake USDC with someone. If neither of you steals before the timer ends, you become friends and get your stake back.</p>
-          <button className="primaryButton" onClick={onConnect}>Connect wallet</button>
+          <button className="primaryButton full" type="button" onClick={onConnect}>Connect wallet</button>
         </section>
 
-        <section className="panelCard termsPanel">
-          <span className="eyebrow">Current parameters</span>
-          <div className="termsBox">
-            <div><span>Stake</span><strong>{formatUsdc(config?.stakeAmt)} USDC</strong></div>
-            <div><span>Duration</span><strong>{secondsToLabel(config?.challengeDuration)}</strong></div>
-            <div><span>Steal opens</span><strong>after {secondsToLabel(config?.stealGracePeriod)}</strong></div>
-            <div><span>Steal bounty</span><strong>{formatUsdc(config?.stealBounty)} USDC</strong></div>
-          </div>
+        <section className="section">
+          <h3 className="sectionTitle">Current parameters</h3>
+          <dl className="factList">
+            <div><dt>Stake</dt><dd>{config ? `${formatUsdc(config.stakeAmt)} USDC` : formatUsdcOrDash(undefined)}</dd></div>
+            <div><dt>Duration</dt><dd>{secondsToLabelOrDash(config?.challengeDuration)}</dd></div>
+            <div><dt>Steal opens</dt><dd>{config ? `after ${secondsToLabelOrDash(config.stealGracePeriod)}` : secondsToLabelOrDash(undefined)}</dd></div>
+            <div><dt>Steal bounty</dt><dd>{config ? `${formatUsdc(config.stealBounty)} USDC` : formatUsdcOrDash(undefined)}</dd></div>
+          </dl>
         </section>
 
-        <section className="panelCard howItWorks">
-          <span className="eyebrow">How it works</span>
-          <div className="simpleSteps">
-            <div><strong>Start</strong><span>Stake with another account.</span></div>
-            <div><strong>Wait</strong><span>Once both stake, the timer starts.</span></div>
-            <div><strong>Finalize</strong><span>If nobody steals, friendship is recorded.</span></div>
-          </div>
+        <section className="section">
+          <h3 className="sectionTitle">How it works</h3>
+          <ol className="steps">
+            <li><strong>Start</strong><span>Stake with another account.</span></li>
+            <li><strong>Wait</strong><span>Once both stake, the timer starts.</span></li>
+            <li><strong>Finalize</strong><span>If nobody steals, the friendship is recorded.</span></li>
+          </ol>
         </section>
       </div>
     )
   }
 
   return (
-    <div className="homeLayout">
+    <div className="pageStack">
       <MatchmakingHero
         account={account}
         config={config}
@@ -367,47 +339,35 @@ export function HomePage({ account, isConnected, config, snapshot, isLoading, on
         onSetProfile={onSetProfile}
       />
 
-      <section className="homeSection feedSection">
-        <div className="sectionHeader slimHeader">
-          <h2>Needs attention</h2>
-          {isLoading ? <small>Refreshing…</small> : null}
+      <section className="section">
+        <div className="sectionHead">
+          <h3 className="sectionTitle">Needs attention</h3>
+          {isLoading ? <span className="sectionNote">Refreshing…</span> : null}
         </div>
 
-        {feedItems.length > 0 ? (
-          <div className="challengeStack">
-            {feedItems.map((challenge) => (
-              <ChallengeCard
+        {attention.length > 0 ? (
+          <div className="rowStack">
+            {attention.map((challenge) => (
+              <ChallengeRow
                 key={challenge.pairKey}
                 challenge={challenge}
-                config={config}
+                profile={snapshot?.friendProfiles?.[challenge.other.toLowerCase()]}
+                appBalance={snapshot?.appBalance}
+                nowSeconds={nowSeconds}
+                busy={txPending}
                 onOpen={onOpenChallenge}
                 onFinalize={onFinalize}
                 onAccept={onAccept}
                 onReject={onReject}
                 onCancel={onCancel}
                 onNavigateAccount={(address) => onNavigate(`/account/${address}`)}
-                nowSeconds={nowSeconds}
               />
             ))}
           </div>
         ) : (
-          <p className="quietHelperText">No pending invites, open steal windows, or finalizations.</p>
+          <p className="emptyNote">Nothing needs you right now. Pending invites, open steal windows, and finalizations show up here.</p>
         )}
       </section>
-
-      <section className="homeSection feedSection">
-        <div className="sectionHeader slimHeader">
-          <h2>Recent activity</h2>
-        </div>
-        <ActivityFeed items={snapshot?.recentActivity ?? []} onNavigateAccount={(address) => onNavigate(`/account/${address}`)} nowSeconds={nowSeconds} />
-      </section>
-
-      <FriendsSection
-        friends={snapshot?.friends ?? []}
-        friendProfiles={snapshot?.friendProfiles}
-        friendRepScores={snapshot?.friendRepScores}
-        onNavigate={onNavigate}
-      />
     </div>
   )
 }

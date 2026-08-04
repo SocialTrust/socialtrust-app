@@ -1,127 +1,171 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Address } from 'viem'
-import type { AccountProfile, SocialProfile } from '../types'
+import type { ContractConfig, SocialProfile, UserSnapshot } from '../types'
 import { AccountPage } from './AccountPage'
 
-const address = '0x0000000000000000000000000000000000000001' as Address
+const account = '0x0000000000000000000000000000000000000001' as Address
 
-const savedProfile: SocialProfile = {
+const profile: SocialProfile = {
   displayName: 'Jamie',
-  xUsername: 'old_x',
+  xUsername: 'jamie_x',
   telegramUsername: 'jamietg',
   discordUsername: 'jamie.discord',
   imgUrl: '',
   exists: true,
 }
 
-const updatedProfile: SocialProfile = { ...savedProfile, displayName: 'Jamie Updated', xUsername: 'new_x' }
-
-const accountProfile: AccountProfile = {
-  address,
-  friendCount: 0n,
-  challengeCount: 0n,
-  repScore: 7n,
+const snapshot: UserSnapshot = {
+  walletUsdc: 312_400_000n,
+  appBalance: 124_500_000n,
   pendingBonus: 0n,
   bonusPaidTo: 0n,
+  repScore: 82n,
+  allowance: 0n,
+  friendCount: 4n,
   friends: [],
   challenges: [],
-  appBalance: 1_000_000n,
-  socialProfile: savedProfile,
+  recentActivity: [],
+  socialProfile: profile,
 }
+
+const config = { stakeAmt: 10_000_000n } as ContractConfig
 
 afterEach(cleanup)
 
-function setup(onSetProfile = vi.fn(async () => true), postSaveReadFails = false) {
-  // The on-chain profile the strict reader serves; the save flips it, exactly
-  // like a confirmed setProfile transaction would.
-  let onChainProfile = savedProfile
-  let reads = 0
-  const readAccountProfile = vi.fn(async () => ({ ...accountProfile, socialProfile: onChainProfile }))
-  const readSocialProfile = vi.fn(async () => {
-    reads += 1
-    if (postSaveReadFails && reads > 1) throw new Error('RPC failed')
-    return onChainProfile
-  })
-  const setProfile = vi.fn(async (values: { displayName: string; xUsername: string }) => {
-    const success = await onSetProfile()
-    if (success) onChainProfile = { ...onChainProfile, ...values }
-    return success
-  })
+type AccountPageProps = Parameters<typeof AccountPage>[0]
 
-  render(
-    <AccountPage
-      address={address}
-      connectedAccount={address}
-      isConnected
-      readAccountProfile={readAccountProfile}
-      readSocialProfile={readSocialProfile}
-      onConnect={vi.fn()}
-      onBackHome={vi.fn()}
-      onStartWith={vi.fn()}
-      onOpenChallenge={vi.fn()}
-      onOpenWallet={vi.fn()}
-      onOpenAdmin={vi.fn()}
-      onSetProfile={setProfile}
-      onNavigate={vi.fn()}
-      nowSeconds={0}
-    />,
-  )
-
-  return { readAccountProfile, readSocialProfile, setProfile }
+function setup(overrides: Partial<AccountPageProps> = {}) {
+  const props: AccountPageProps = {
+    account,
+    isConnected: true,
+    isOwner: false,
+    snapshot,
+    config,
+    onConnect: vi.fn(),
+    onEditProfile: vi.fn(),
+    onShowQr: vi.fn(),
+    onOpenWallet: vi.fn(),
+    onOpenAdmin: vi.fn(),
+    onOpenTerms: vi.fn(),
+    onSwitchNetwork: vi.fn(),
+    onDisconnect: vi.fn(),
+    ...overrides,
+  }
+  render(<AccountPage {...props} />)
+  return props
 }
 
-async function editDisplayName() {
-  await userEvent.click(await screen.findByRole('button', { name: /Edit/ }))
-  const input = await screen.findByLabelText('Display name')
-  await userEvent.clear(input)
-  await userEvent.type(input, 'Jamie Updated')
-  await userEvent.click(screen.getByRole('button', { name: 'Save profile' }))
-}
-
-describe('AccountPage profile save', () => {
-  it('updates the visible profile without reloading the whole account', async () => {
-    const { readAccountProfile, readSocialProfile } = setup()
-    expect(await screen.findByRole('heading', { name: 'Jamie' })).toBeTruthy()
-    expect(readAccountProfile).toHaveBeenCalledOnce()
-
-    await editDisplayName()
-
-    expect(await screen.findByRole('heading', { name: 'Jamie Updated' })).toBeTruthy()
-    // The profile card reflects the save too, and the sheet closed.
-    await waitFor(() => expect(screen.queryByLabelText('Display name')).toBeNull())
-    // Only the initial page load reads the whole account: reputation, balances,
-    // allowance, friends, challenges, and Graph activity are not refetched.
-    expect(readAccountProfile).toHaveBeenCalledOnce()
-    // One strict profile read to prepopulate the editor, one after the save.
-    expect(readSocialProfile).toHaveBeenCalledTimes(2)
+describe('AccountPage (self control centre)', () => {
+  it('separates the app balance from the wallet balance and names both in USDC', () => {
+    setup()
+    expect(screen.getByText('SocialTrust app balance')).toBeTruthy()
+    expect(screen.getByText('124.50 USDC')).toBeTruthy()
+    expect(screen.getByText('Wallet USDC')).toBeTruthy()
+    expect(screen.getByText('312.40 USDC')).toBeTruthy()
+    // Money is never relabelled as a trust score.
+    expect(screen.queryByText(/Trust Balance/i)).toBeNull()
   })
 
-  it('keeps the account untouched when the save fails', async () => {
-    const { readAccountProfile, readSocialProfile } = setup(vi.fn(async () => false))
-    expect(await screen.findByRole('heading', { name: 'Jamie' })).toBeTruthy()
-
-    await editDisplayName()
-
-    // Modal stays open with the edit preserved, and nothing was refreshed.
-    expect(screen.getByDisplayValue('Jamie Updated')).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Jamie' })).toBeTruthy()
-    expect(readAccountProfile).toHaveBeenCalledOnce()
-    expect(readSocialProfile).toHaveBeenCalledOnce()
+  it('shows reputation and friend count as the key stats', () => {
+    setup()
+    const stats = screen.getByLabelText('Key stats')
+    expect(stats.textContent).toContain('Reputation')
+    expect(stats.textContent).toContain('82')
+    expect(stats.textContent).toContain('Friends')
+    expect(stats.textContent).toContain('4')
   })
 
-  it('still closes the editor when the post-save profile read fails', async () => {
-    const { readAccountProfile } = setup(vi.fn(async () => true), true)
-    expect(await screen.findByRole('heading', { name: 'Jamie' })).toBeTruthy()
+  it('opens the funds sheet on the tab that matches the action', async () => {
+    const { onOpenWallet } = setup()
+    await userEvent.click(screen.getByRole('button', { name: /Deposit/ }))
+    expect(onOpenWallet).toHaveBeenCalledWith('deposit')
+    await userEvent.click(screen.getByRole('button', { name: /Withdraw/ }))
+    expect(onOpenWallet).toHaveBeenCalledWith('withdraw')
+  })
 
-    await editDisplayName()
+  it('shows the stored public profile fields and never claims they are verified', () => {
+    setup()
+    expect(screen.getByText('@jamie_x')).toBeTruthy()
+    expect(screen.getByText('@jamietg')).toBeTruthy()
+    expect(screen.getByText('@jamie.discord')).toBeTruthy()
+    expect(screen.queryByText(/verified/i)).toBeNull()
+    expect(screen.getByText(/does not verify/i)).toBeTruthy()
+  })
 
-    // The save itself succeeded, so the sheet closes; the page keeps the last
-    // known profile rather than falling back to a whole-account reload.
-    await waitFor(() => expect(screen.queryByLabelText('Display name')).toBeNull())
-    expect(screen.getByRole('heading', { name: 'Jamie' })).toBeTruthy()
-    expect(readAccountProfile).toHaveBeenCalledOnce()
+  it('lets the avatar speak for itself when a custom profile image is set', () => {
+    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://pbs.twimg.com/profile_images/1/a.jpg' } } })
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('.listRowValue')).toBeNull()
+    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://pbs.twimg.com/profile_images/1/a.jpg')
+  })
+
+  it('says "Not set" when there is no custom profile image', () => {
+    setup()
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('.listRowValue')?.textContent).toBe('Not set')
+    expect(row.querySelector('img')).toBeNull()
+  })
+
+  it('falls back to the default avatar for a stored image outside the allowed host', () => {
+    // A profile written before the restriction, or by another client, must not
+    // make the app fetch from an arbitrary host.
+    setup({ snapshot: { ...snapshot, socialProfile: { ...profile, imgUrl: 'https://pbs.twimg.com.evil.com/profile_images/1/a.jpg' } } })
+    const row = screen.getByText('Profile image').closest('.listRow')!
+    expect(row.querySelector('img')).toBeNull()
+    expect(row.querySelector('.listRowValue')?.textContent).toBe('Not set')
+    // The identity block avatar makes the same decision.
+    expect(document.querySelector('.profileAvatar-lg img')).toBeNull()
+    expect(document.querySelector('.profileAvatar-lg')?.className).toContain('profileAvatar-empty')
+  })
+
+  it('hides the allowance row when the allowance already covers a stake', () => {
+    setup({ snapshot: { ...snapshot, allowance: 999_000_000n } })
+    expect(screen.queryByText('USDC allowance')).toBeNull()
+  })
+
+  it('shows the network exactly once, in the section that can act on it', () => {
+    setup()
+    // Funds owns Network because that row carries the wrong-network state and
+    // the switch action; the Account section must not repeat it.
+    expect(screen.getAllByText('Network')).toHaveLength(1)
+    const accountSection = screen.getByText('Account', { selector: '.sectionTitle' }).closest('section')!
+    expect(accountSection.textContent).not.toContain('Network')
+    expect(accountSection.textContent).toContain('Connected wallet')
+    expect(accountSection.textContent).toContain('Protocol terms')
+  })
+
+  it('shows admin controls only for the contract owner', async () => {
+    const { onOpenAdmin } = setup({ isOwner: true })
+    await userEvent.click(screen.getByRole('button', { name: /Admin controls/ }))
+    expect(onOpenAdmin).toHaveBeenCalledOnce()
+
+    cleanup()
+    setup({ isOwner: false })
+    expect(screen.queryByText('Admin controls')).toBeNull()
+  })
+
+  it('exposes edit profile, QR sharing, and disconnect', async () => {
+    const { onEditProfile, onShowQr, onDisconnect } = setup()
+    await userEvent.click(screen.getAllByRole('button', { name: /Edit profile/ })[0])
+    expect(onEditProfile).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: /Show my QR/ }))
+    expect(onShowQr).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: /Disconnect wallet/ }))
+    expect(onDisconnect).toHaveBeenCalledOnce()
+  })
+
+  it('offers a network switch only when the wallet is on the wrong chain', async () => {
+    const { onSwitchNetwork } = setup({ wrongNetwork: true })
+    await userEvent.click(screen.getAllByRole('button', { name: /Network/ })[0])
+    expect(onSwitchNetwork).toHaveBeenCalledOnce()
+  })
+
+  it('asks for a wallet before showing any account data', () => {
+    setup({ isConnected: false, account: undefined })
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+    expect(screen.queryByText('SocialTrust app balance')).toBeNull()
   })
 })

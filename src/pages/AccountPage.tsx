@@ -1,389 +1,231 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Address } from "viem";
-import { Copy, Pencil } from "lucide-react";
-import type {
-  AccountProfile,
-  ChallengeView,
-  ContractConfig,
-  SocialProfile,
-} from "../types";
-import { copyText, formatUsdc, sameAddress, shortAddress } from "../lib/format";
-import { getChallengeState } from "../lib/challenges";
-import { ProfileAvatar, displayNameFor } from "../components/ProfileAvatar";
-import { ProfileEditSheet, type ProfileFormValues } from "../components/ProfileEditSheet";
+import { useEffect, useRef, useState } from 'react'
+import type { Address } from 'viem'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Check,
+  Copy,
+  FileText,
+  LogOut,
+  Pencil,
+  QrCode,
+  Settings,
+  Wallet,
+} from 'lucide-react'
+import type { ContractConfig, UserSnapshot } from '../types'
+import { copyText, formatUsdc, shortAddress } from '../lib/format'
+import { appConfig } from '../lib/config'
+import { profileImageSrc } from '../lib/profileImage'
+import { ListRow } from '../components/ListRow'
+import { ProfileAvatar } from '../components/ProfileAvatar'
 
 type AccountPageProps = {
-  address?: Address;
-  connectedAccount?: Address;
-  isConnected: boolean;
-  config?: ContractConfig;
-  readAccountProfile: (address: Address) => Promise<AccountProfile>;
-  readSocialProfile: (address: Address) => Promise<SocialProfile>;
-  onConnect: () => void;
-  onBackHome: () => void;
-  onStartWith: (address?: string) => void;
-  onOpenChallenge: (challenge: ChallengeView) => void;
-  onOpenWallet: () => void;
-  onOpenAdmin: () => void;
-  onSetProfile: (values: ProfileFormValues) => Promise<boolean | void> | void;
-  onNavigate: (path: string) => void;
-  nowSeconds: number;
-};
-
-function socialHandle(value?: string) {
-  const clean = value?.trim();
-  return clean ? `@${clean}` : "Not set";
+  account?: Address
+  isConnected: boolean
+  isOwner: boolean
+  snapshot?: UserSnapshot
+  config?: ContractConfig
+  wrongNetwork?: boolean
+  onConnect: () => void
+  onEditProfile: () => void
+  onShowQr: () => void
+  onOpenWallet: (tab: 'deposit' | 'withdraw') => void
+  onOpenAdmin: () => void
+  onOpenTerms: () => void
+  onSwitchNetwork: () => void
+  onDisconnect: () => void
 }
 
-function AccountIdentity({
-  address,
-  profile,
-  socialProfile,
-  isSelf,
-}: {
-  address: Address;
-  profile?: AccountProfile;
-  socialProfile?: SocialProfile;
-  isSelf: boolean;
-}) {
-  const hasDisplayName = Boolean(socialProfile?.displayName?.trim());
-  const primaryName = hasDisplayName
-    ? socialProfile?.displayName?.trim()
-    : isSelf
-      ? "My account"
-      : undefined;
-
-  return (
-    <section className="accountIdentityBlock accountIdentityClean">
-      <ProfileAvatar address={address} profile={socialProfile} size="lg" />
-      {primaryName ? <h1 className="heroDisplayName">{primaryName}</h1> : null}
-      <div className="heroAddressLine" aria-label="Account address">
-        <span className="heroAddressText">{shortAddress(address, 6)}</span>
-        <button
-          className="copyIconButton"
-          onClick={() => copyText(address)}
-          aria-label="Copy address"
-          title="Copy address"
-        >
-          <Copy size={15} />
-        </button>
-      </div>
-      <div className={`heroStats ${isSelf ? "two" : "one"}`}>
-        {isSelf ? (
-          <div>
-            <span>Balance</span>
-            <strong>{formatUsdc(profile?.appBalance)} USDC</strong>
-          </div>
-        ) : null}
-        <div>
-          <span>Reputation</span>
-          <strong>{String(profile?.repScore ?? 0n)}</strong>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function profileValue(value?: string, formatter?: (value: string) => string) {
-  const clean = value?.trim();
-  if (!clean) return "Not set";
-  return formatter ? formatter(clean) : clean;
-}
-
-function ProfileSection({
-  profile,
-  onEdit,
-}: {
-  profile?: SocialProfile;
-  onEdit: () => void;
-}) {
-  return (
-    <section className="accountSection profileDetailsCard">
-      <div className="profileSectionHeader">
-        <span className="eyebrow">Profile</span>
-        <button className="profileEditLink" onClick={onEdit}>
-          <Pencil size={14} /> Edit
-        </button>
-      </div>
-      <div className="profileRows">
-        <div className="profileDetailRow">
-          <span>Display name</span>
-          <strong>{profileValue(profile?.displayName)}</strong>
-        </div>
-        <div className="profileDetailRow">
-          <span>X</span>
-          <strong>
-            {profileValue(profile?.xUsername, (value) => `@${value}`)}
-          </strong>
-        </div>
-        <div className="profileDetailRow">
-          <span>Telegram</span>
-          <strong>
-            {profileValue(profile?.telegramUsername, (value) => `@${value}`)}
-          </strong>
-        </div>
-      </div>
-      {!profile?.exists ? (
-        <p className="finePrint profileHint">
-          Set a display name so friends can recognise you more easily.
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function SocialLinksCard({ profile }: { profile?: SocialProfile }) {
-  return (
-    <section className="accountSection socialLinksCard">
-      <div className="sectionHeader compactHeader">
-        <div>
-          <span className="eyebrow">Socials</span>
-          <h2>Public handles</h2>
-        </div>
-      </div>
-      <div className="accountRows">
-        <div>
-          <span>X</span>
-          <strong>{socialHandle(profile?.xUsername)}</strong>
-        </div>
-        <div>
-          <span>Telegram</span>
-          <strong>{socialHandle(profile?.telegramUsername)}</strong>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FriendsPreview({
-  friends,
-  friendProfiles,
-  friendRepScores,
-  onNavigate,
-}: {
-  friends: Address[];
-  friendProfiles?: Record<string, SocialProfile>;
-  friendRepScores?: Record<string, bigint>;
-  onNavigate: (path: string) => void;
-}) {
-  return (
-    <section className="accountSection friendsSectionClean">
-      <div className="profileSectionHeader">
-        <span className="eyebrow">Friends</span>
-      </div>
-      <div className="friendCardList">
-        {friends.slice(0, 8).map((friend) => {
-          const friendProfile = friendProfiles?.[friend.toLowerCase()];
-          const friendRep = friendRepScores?.[friend.toLowerCase()] ?? 0n;
-          return (
-            <button
-              className="friendRowCard friendRowTwoLine"
-              key={friend}
-              onClick={() => onNavigate(`/account/${friend}`)}
-              aria-label={`Open ${displayNameFor(friend, friendProfile)}`}
-            >
-              <ProfileAvatar
-                address={friend}
-                profile={friendProfile}
-                size="sm"
-              />
-              <span>
-                <strong>{displayNameFor(friend, friendProfile)}</strong>
-                <small>Reputation {String(friendRep)}</small>
-              </span>
-            </button>
-          );
-        })}
-        {friends.length === 0 ? (
-          <p className="emptyText">No finalized friendships yet.</p>
-        ) : null}
-      </div>
-    </section>
-  );
+function handleValue(value?: string) {
+  const clean = value?.trim()
+  return clean ? `@${clean}` : 'Not set'
 }
 
 export function AccountPage({
-  address,
-  connectedAccount,
+  account,
   isConnected,
+  isOwner,
+  snapshot,
   config,
-  readAccountProfile,
-  readSocialProfile,
+  wrongNetwork,
   onConnect,
-  onBackHome,
-  onStartWith,
-  onOpenChallenge,
+  onEditProfile,
+  onShowQr,
   onOpenWallet,
   onOpenAdmin,
-  onSetProfile,
-  onNavigate,
-  nowSeconds,
+  onOpenTerms,
+  onSwitchNetwork,
+  onDisconnect,
 }: AccountPageProps) {
-  const [profile, setProfile] = useState<AccountProfile | undefined>();
-  const [error, setError] = useState<string | undefined>();
-  const [loading, setLoading] = useState(false);
-  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<number | undefined>(undefined)
 
-  const isSelf = Boolean(
-    address && connectedAccount && sameAddress(address, connectedAccount),
-  );
-  const canAdmin = Boolean(
-    connectedAccount &&
-    config?.owner &&
-    sameAddress(connectedAccount, config.owner),
-  );
+  useEffect(() => () => {
+    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current)
+  }, [])
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      if (!address) return;
-      setLoading(true);
-      setError(undefined);
-      try {
-        const next = await readAccountProfile(address);
-        if (!cancelled) setProfile(next);
-      } catch (err) {
-        if (!cancelled)
-          setError(
-            err instanceof Error ? err.message : "Could not load account.",
-          );
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [address, readAccountProfile]);
-
-  const liveCounts = useMemo(() => {
-    const counts = { attention: 0, active: 0, waiting: 0 };
-    for (const challenge of profile?.challenges ?? []) {
-      const state = getChallengeState(challenge, nowSeconds);
-      if (state === "active-safe" || state === "steal-open") counts.active += 1;
-      if (state === "pending-outgoing") counts.waiting += 1;
-      if (
-        state === "pending-incoming" ||
-        state === "ready-finalize" ||
-        state === "steal-open" ||
-        state === "pending-outgoing"
-      )
-        counts.attention += 1;
-    }
-    return counts;
-  }, [profile?.challenges, nowSeconds]);
-
-  if (!address) {
+  if (!isConnected || !account) {
     return (
-      <div className="emptyState pageEmpty">
-        <h1>Connect to view your account</h1>
-        <p>The /me route resolves to your connected wallet.</p>
-        <button className="primaryButton" onClick={onConnect}>
-          Connect wallet
-        </button>
+      <div className="pageStack">
+        <section className="emptyPanel">
+          <h2>Connect your wallet</h2>
+          <p>Your account, balances, profile, and controls live here once a wallet is connected.</p>
+          <button className="primaryButton full" type="button" onClick={onConnect}>Connect wallet</button>
+        </section>
       </div>
-    );
+    )
+  }
+
+  const profile = snapshot?.socialProfile
+  const displayName = profile?.displayName?.trim() || 'My account'
+  const allowance = snapshot?.allowance ?? 0n
+  const stake = config?.stakeAmt ?? 0n
+  // An allowance only matters when the next deposit or stake would need an
+  // extra approval transaction. Otherwise it is noise.
+  const showAllowance = stake > 0n && allowance < stake
+
+  const copyAddress = async () => {
+    await copyText(account)
+    setCopied(true)
+    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1600)
   }
 
   return (
-    <div className="accountLayout">
-      {loading ? (
-        <div className="emptyState calm">
-          <h3>Loading account…</h3>
+    <div className="pageStack">
+      <section className="identityBlock">
+        <ProfileAvatar address={account} profile={profile} size="lg" />
+        <h2>{displayName}</h2>
+        <button
+          className={`addressChip ${copied ? 'copied' : ''}`}
+          type="button"
+          onClick={copyAddress}
+          aria-label={copied ? 'Address copied' : 'Copy your wallet address'}
+        >
+          {shortAddress(account, 6)}
+          {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        </button>
+        <span className="copyFeedback" role="status">{copied ? 'Address copied' : ''}</span>
+        <div className="identityActions">
+          <button className="secondaryButton" type="button" onClick={onEditProfile}>
+            <Pencil size={15} aria-hidden="true" /> Edit profile
+          </button>
+          <button className="secondaryButton" type="button" onClick={onShowQr}>
+            <QrCode size={15} aria-hidden="true" /> Show my QR
+          </button>
         </div>
-      ) : null}
-      {error ? (
-        <div className="emptyState errorBox">
-          <h3>Could not load account</h3>
-          <p>{error}</p>
+      </section>
+
+      <section className="statPair" aria-label="Key stats">
+        <div>
+          <span>Reputation</span>
+          <strong>{String(snapshot?.repScore ?? 0n)}</strong>
         </div>
-      ) : null}
+        <div>
+          <span>Friends</span>
+          <strong>{String(snapshot?.friendCount ?? 0n)}</strong>
+        </div>
+      </section>
 
-      <AccountIdentity
-        address={address}
-        profile={profile}
-        socialProfile={profile?.socialProfile}
-        isSelf={isSelf}
-      />
-
-      {profile ? (
-        <>
-          {!isConnected ? (
-            <section className="connectPromptBlock">
-              <p>
-                Connect to start a friendship with this account or respond to an invite.
-              </p>
-              <button className="primaryButton" onClick={onConnect}>
-                Connect wallet
-              </button>
-            </section>
-          ) : null}
-
-          {isSelf ? (
-            <>
-              <ProfileSection
-                profile={profile.socialProfile}
-                onEdit={() => setProfileEditOpen(true)}
-              />
-
-              <ProfileEditSheet
-                open={profileEditOpen}
-                loadProfile={() => readSocialProfile(address)}
-                onClose={() => setProfileEditOpen(false)}
-                onSave={async (values) => {
-                  const success = await onSetProfile(values);
-                  // A profile edit changes only the profile: update that one
-                  // field instead of reloading the whole account (reputation,
-                  // balances, allowance, friends, challenges, Graph activity).
-                  if (success) {
-                    const freshSocialProfile = await readSocialProfile(
-                      address,
-                    ).catch(() => undefined);
-                    if (freshSocialProfile) {
-                      setProfile((current) =>
-                        current
-                          ? { ...current, socialProfile: freshSocialProfile }
-                          : current,
-                      );
-                    }
-                  }
-                  return success;
-                }}
-              />
-            </>
-          ) : isConnected ? (
-            <>
-              {profile.socialProfile?.exists ? (
-                <SocialLinksCard profile={profile.socialProfile} />
-              ) : null}
-            </>
-          ) : null}
-
-          <FriendsPreview
-            friends={profile.friends}
-            friendProfiles={profile.friendProfiles}
-            friendRepScores={profile.friendRepScores}
-            onNavigate={onNavigate}
+      <section className="section">
+        <h3 className="sectionTitle">Funds</h3>
+        <div className="listGroup">
+          <ListRow
+            leading={<span className="rowIcon"><Wallet size={16} aria-hidden="true" /></span>}
+            title="SocialTrust app balance"
+            subtitle="Held for stakes and match fees"
+            value={`${formatUsdc(snapshot?.appBalance)} USDC`}
+            trailing={null}
           />
-
-          {isSelf && canAdmin ? (
-            <section className="accountSection adminPrompt">
-              <div>
-                <span className="eyebrow">Owner</span>
-                <h2>Admin controls</h2>
-                <p>
-                  Manage challenge settings, bonus settings, and reputation
-                  scores.
-                </p>
-              </div>
-              <button className="primaryButton" onClick={onOpenAdmin}>
-                Open admin
-              </button>
-            </section>
+          <ListRow
+            title="Wallet USDC"
+            subtitle="In your wallet, not yet deposited"
+            value={`${formatUsdc(snapshot?.walletUsdc)} USDC`}
+            trailing={null}
+          />
+          {showAllowance ? (
+            <ListRow
+              title="USDC allowance"
+              subtitle="Below the stake — expect an approval step"
+              value={`${formatUsdc(allowance)} USDC`}
+              trailing={null}
+            />
           ) : null}
-        </>
-      ) : null}
+          <ListRow
+            title="Network"
+            value={appConfig.chainName}
+            subtitle={wrongNetwork ? 'Your wallet is on a different network' : undefined}
+            trailing={wrongNetwork ? <span className="rowBadge rowBadgeWarning">Switch</span> : null}
+            onClick={wrongNetwork ? onSwitchNetwork : undefined}
+          />
+        </div>
+        <div className="buttonPair">
+          <button className="primaryButton" type="button" onClick={() => onOpenWallet('deposit')}>
+            <ArrowDownToLine size={16} aria-hidden="true" /> Deposit
+          </button>
+          <button className="secondaryButton" type="button" onClick={() => onOpenWallet('withdraw')}>
+            <ArrowUpFromLine size={16} aria-hidden="true" /> Withdraw
+          </button>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="sectionHead">
+          <h3 className="sectionTitle">Public profile</h3>
+          <button className="linkButton" type="button" onClick={onEditProfile}>Edit profile</button>
+        </div>
+        <div className="listGroup">
+          <ListRow title="Display name" value={profile?.displayName?.trim() || 'Not set'} trailing={null} />
+          <ListRow title="X" value={handleValue(profile?.xUsername)} trailing={null} />
+          <ListRow title="Telegram" value={handleValue(profile?.telegramUsername)} trailing={null} />
+          <ListRow title="Discord" value={handleValue(profile?.discordUsername)} trailing={null} />
+          <ListRow
+            title="Profile image"
+            // The avatar already shows a custom image; "Set" beside it says
+            // nothing extra. Only the absence of one needs spelling out — and
+            // a stored URL we refuse to render counts as absent.
+            value={profileImageSrc(profile?.imgUrl) ? undefined : 'Not set'}
+            trailing={<ProfileAvatar address={account} profile={profile} size="sm" />}
+          />
+        </div>
+        <p className="quietCaption">These handles are self-declared and stored on chain. SocialTrust does not verify that you own them.</p>
+      </section>
+
+      <section className="section">
+        <h3 className="sectionTitle">Account</h3>
+        <div className="listGroup">
+          {/* Network lives in Funds, where it can also show the wrong-network
+              state and offer the switch. One row is enough. */}
+          <ListRow title="Connected wallet" value={shortAddress(account, 6)} trailing={null} />
+          <ListRow
+            leading={<span className="rowIcon"><FileText size={16} aria-hidden="true" /></span>}
+            title="Protocol terms"
+            subtitle="Live stake, fee, and timing settings"
+            onClick={onOpenTerms}
+          />
+          {isOwner ? (
+            <ListRow
+              leading={<span className="rowIcon"><Settings size={16} aria-hidden="true" /></span>}
+              title="Admin controls"
+              subtitle="Challenge, bonus, and reputation settings"
+              value={<span className="rowBadge">Owner</span>}
+              onClick={onOpenAdmin}
+            />
+          ) : null}
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="listGroup listGroupQuiet">
+          <ListRow
+            leading={<span className="rowIcon rowIconDanger"><LogOut size={16} aria-hidden="true" /></span>}
+            title="Disconnect wallet"
+            tone="danger"
+            onClick={onDisconnect}
+            trailing={null}
+          />
+        </div>
+      </section>
     </div>
-  );
+  )
 }

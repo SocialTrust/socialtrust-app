@@ -63,6 +63,30 @@ cp .env.example .env.local
 npm run dev -- --host 0.0.0.0
 ```
 
+## Mobile app shell (information architecture)
+
+The UI is a mobile-first, app-like shell with four fixed bottom tabs. Routing
+stays in the existing lightweight `history.pushState` + `popstate` router
+(`src/lib/routes.ts`); no routing library was added.
+
+| Route | Screen | Purpose |
+| --- | --- | --- |
+| `/` | Home | Matchmaking hero + items that need attention. No general feed. |
+| `/friends` | Friends | In-progress challenges, finalized friends, and the primary `Start friendship` action. |
+| `/activity` | Activity | The full chronological Graph-backed activity feed. |
+| `/me` | Account | Identity, key stats, funds, public profile, and account controls. |
+| `/account/:address` | Public profile | Another account's public data. Keeps the Friends tab selected. |
+
+Shared UI primitives live in `src/components`: `BottomNav`, `TopBar`, `ListRow`,
+`Sheet` (backdrop, drag indicator, Escape/backdrop close, scroll lock, focus
+handling, optional full-screen mode for QR scanning), `ChallengeRow`, and
+`ActivityList`. Pages hold layout only — every transaction still runs through
+`useSocialTrust`.
+
+Self-only data (app balance, wallet USDC, allowance, profile editing, admin
+controls, disconnect) is rendered by `AccountPage` alone. `PublicProfilePage`
+never reads those fields.
+
 ## Data architecture
 
 The Graph supplies:

@@ -1,53 +1,96 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { UserSnapshot } from '../types'
-import { formatUsdc, parseUsdc } from '../lib/format'
+import { formatUsdc } from '../lib/format'
+import { formatUsdcPlain, parseUsdcStrict } from '../lib/amount'
+import { appConfig } from '../lib/config'
 import { Sheet } from './Sheet'
 
 type WalletSheetProps = {
   open: boolean
   snapshot?: UserSnapshot
+  /** Which tab the sheet opens on, so Account can deep-link Deposit/Withdraw. */
+  initialTab?: 'deposit' | 'withdraw'
   onClose: () => void
-  onDeposit: (amount: string) => void
-  onWithdraw: (amount: string) => void
+  onDeposit: (amount: string) => Promise<boolean | void> | void
+  onWithdraw: (amount: string) => Promise<boolean | void> | void
 }
 
 const QUICK_AMOUNTS = ['5.00', '10.00', '25.00']
 
-export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: WalletSheetProps) {
-  const [tab, setTab] = useState<'deposit' | 'withdraw'>('deposit')
+export function WalletSheet({ open, snapshot, initialTab = 'deposit', onClose, onDeposit, onWithdraw }: WalletSheetProps) {
+  const [tab, setTab] = useState<'deposit' | 'withdraw'>(initialTab)
   const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const amountUnits = useMemo(() => parseUsdc(amount), [amount])
+  useEffect(() => {
+    if (open) {
+      setTab(initialTab)
+      setAmount('')
+    }
+  }, [open, initialTab])
+
+  // undefined means the text is not a valid amount, which is different from
+  // zero: the action stays disabled rather than submitting a silent 0.
+  const amountUnits = useMemo(() => parseUsdcStrict(amount), [amount])
   const appBalance = snapshot?.appBalance ?? 0n
   const balance = tab === 'deposit' ? snapshot?.walletUsdc ?? 0n : appBalance
-  const validAmount = amountUnits > 0n && amountUnits <= balance
-  const needsApproval = tab === 'deposit' && amountUnits > 0n && (snapshot?.allowance ?? 0n) < amountUnits
+  const validAmount = amountUnits !== undefined && amountUnits > 0n && amountUnits <= balance
+  const needsApproval = tab === 'deposit' && amountUnits !== undefined && amountUnits > 0n && (snapshot?.allowance ?? 0n) < amountUnits
 
   const entered = amount.trim()
-  const actionLabel =
-    tab === 'deposit'
-      ? needsApproval
-        ? `Approve + deposit $ ${entered}`
-        : entered
-          ? `Deposit $ ${entered}`
-          : 'Deposit'
-      : entered
-        ? `Withdraw $ ${entered}`
-        : 'Withdraw'
+  const actionLabel = submitting
+    ? 'Confirming…'
+    : tab === 'deposit'
+      ? entered
+        ? needsApproval ? `Approve + deposit ${entered} USDC` : `Deposit ${entered} USDC`
+        : 'Deposit'
+      : entered ? `Withdraw ${entered} USDC` : 'Withdraw'
 
-  const balancesHeader = (
-    <div className="walletHeaderBalances">
-      <span>Wallet</span><strong>$ {formatUsdc(snapshot?.walletUsdc)}</strong>
-      <span>App</span><strong>$ {formatUsdc(snapshot?.appBalance)}</strong>
-    </div>
+  const submit = async () => {
+    if (submitting || !validAmount) return
+    setSubmitting(true)
+    try {
+      const success = tab === 'deposit' ? await onDeposit(amount) : await onWithdraw(amount)
+      if (success) {
+        setAmount('')
+        onClose()
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const footer = (
+    <>
+      <button className="primaryButton full" type="button" disabled={!validAmount || submitting} onClick={submit}>
+        {actionLabel}
+      </button>
+      {needsApproval ? (
+        <p className="footerCaption">Your USDC allowance is below this amount, so your wallet asks for an approval first, then the deposit.</p>
+      ) : (
+        <p className="footerCaption">App balance is held by SocialTrust for stakes and match fees. Wallet USDC stays in your wallet.</p>
+      )}
+    </>
   )
 
   return (
-    <Sheet open={open} title="Wallet" header={balancesHeader} onClose={onClose}>
+    <Sheet open={open} title="Funds" description={`USDC on ${appConfig.chainName}`} onClose={onClose} busy={submitting} footer={footer}>
       <div className="formStack">
+        <div className="balanceSplit">
+          <div>
+            <span>App balance</span>
+            <strong>{formatUsdc(snapshot?.appBalance)} USDC</strong>
+          </div>
+          <div>
+            <span>Wallet USDC</span>
+            <strong>{formatUsdc(snapshot?.walletUsdc)} USDC</strong>
+          </div>
+        </div>
+
         <div className="segmentedControl">
           <button
             className={`segmentedOption ${tab === 'deposit' ? 'active' : ''}`}
+            type="button"
             aria-pressed={tab === 'deposit'}
             onClick={() => setTab('deposit')}
           >
@@ -55,6 +98,7 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
           </button>
           <button
             className={`segmentedOption ${tab === 'withdraw' ? 'active' : ''}`}
+            type="button"
             aria-pressed={tab === 'withdraw'}
             onClick={() => setTab('withdraw')}
           >
@@ -62,13 +106,11 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
           </button>
         </div>
 
-        <div>
-          <div className="amountContext">
-            <label htmlFor="walletAmount">Amount</label>
-            <span className="amountContextBalance">
-              Available: <strong>$ {formatUsdc(balance, { compact: true })}</strong>
-            </span>
-          </div>
+        <label className="fieldLabel" htmlFor="walletAmount">
+          <span className="fieldLabelRow">
+            Amount
+            <span className="fieldLabelHint">Available {formatUsdc(balance)} USDC</span>
+          </span>
           <input
             id="walletAmount"
             value={amount}
@@ -76,24 +118,16 @@ export function WalletSheet({ open, snapshot, onClose, onDeposit, onWithdraw }: 
             inputMode="decimal"
             placeholder="25.00"
           />
-          <div className="quickChips">
-            {QUICK_AMOUNTS.map((quick) => (
-              <button key={quick} className="quickChip" onClick={() => setAmount(quick)}>
-                ${formatUsdc(parseUsdc(quick), { compact: true })}
-              </button>
-            ))}
-            <button className="quickChip" onClick={() => setAmount(formatUsdc(balance, { truncate: true }))}>Max</button>
-          </div>
+        </label>
+
+        <div className="quickChips">
+          {QUICK_AMOUNTS.map((quick) => (
+            <button key={quick} className="quickChip" type="button" onClick={() => setAmount(quick)}>
+              {formatUsdc(parseUsdcStrict(quick), { compact: true })} USDC
+            </button>
+          ))}
+          <button className="quickChip" type="button" onClick={() => setAmount(formatUsdcPlain(balance))}>Max</button>
         </div>
-
-        <button
-          className="primaryButton full"
-          disabled={!validAmount}
-          onClick={() => (tab === 'deposit' ? onDeposit(amount) : onWithdraw(amount))}
-        >
-          {actionLabel}
-        </button>
-
       </div>
     </Sheet>
   )
