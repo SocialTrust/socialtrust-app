@@ -99,13 +99,19 @@ function graphPayload(user: string) {
   }
 }
 
-/** Records the snapshot at every render, so transient leaks are visible. */
-const rendered: (UserSnapshot | undefined)[] = []
+/**
+ * Records which account was connected and which snapshot the hook exposed on
+ * every single render. Clearing in an effect leaves one committed render where
+ * the pair disagrees, and only a per-render record can see it.
+ */
+type RenderRecord = { currentAccount: Address | undefined; snapshot: UserSnapshot | undefined }
+
+const rendered: RenderRecord[] = []
 let hookResult: ReturnType<typeof useSocialTrust>
 
 function Probe() {
   hookResult = useSocialTrust()
-  rendered.push(hookResult.snapshot)
+  rendered.push({ currentAccount: connectedAccount, snapshot: hookResult.snapshot })
   return null
 }
 
@@ -114,14 +120,31 @@ function renderProbe() {
   return { rerender: () => view.rerender(<Probe />) }
 }
 
-/** Every snapshot ever rendered that carries the given account's data. */
+/** Does this snapshot carry any data belonging to `account`? */
+function carriesDataFor(snapshot: UserSnapshot | undefined, account: Address) {
+  if (!snapshot) return false
+  return snapshot.appBalance === BALANCE[account]
+    || snapshot.repScore === REP[account]
+    || snapshot.friends.some((friend) => friend.toLowerCase() === FRIEND_OF[account].toLowerCase())
+    || snapshot.recentActivity.some((item) => item.id === `activity-${account.toLowerCase()}`)
+}
+
+/** Every render that exposed the given account's data. */
 function rendersShowing(account: Address) {
-  return rendered.filter((snapshot) => {
-    if (!snapshot) return false
-    return snapshot.appBalance === BALANCE[account]
-      || snapshot.repScore === REP[account]
-      || snapshot.friends.some((friend) => friend.toLowerCase() === FRIEND_OF[account].toLowerCase())
-      || snapshot.recentActivity.some((item) => item.id === `activity-${account.toLowerCase()}`)
+  return rendered.filter((record) => carriesDataFor(record.snapshot, account))
+}
+
+/**
+ * Renders where the connected account and the exposed snapshot disagree:
+ * account B, or a disconnected wallet, paired with account A's data. Must
+ * always be empty — including for a render that was committed and then
+ * immediately replaced by an effect.
+ */
+function mismatchedRenders(previous: Address) {
+  return rendered.filter((record) => {
+    if (!carriesDataFor(record.snapshot, previous)) return false
+    // Showing A's data is only legitimate while A is the connected account.
+    return !record.currentAccount || record.currentAccount.toLowerCase() !== previous.toLowerCase()
   })
 }
 
@@ -189,6 +212,7 @@ describe('account state isolation', () => {
     expect(hookResult.snapshot?.friends).toEqual([FRIEND_B])
     // A's data was never rendered, not even for one commit.
     expect(rendersShowing(ACCOUNT_A)).toEqual([])
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
   })
 
   it('clears account state immediately on switch, before the new load arrives', async () => {
@@ -210,6 +234,41 @@ describe('account state isolation', () => {
     expect(hookResult.snapshot?.friends).toEqual([FRIEND_B])
   })
 
+  it('never renders account B alongside account A’s snapshot, not even once', async () => {
+    // The first render after a switch happens before any effect runs, so a
+    // snapshot cleared in useEffect is still on screen for that commit.
+    const { rerender } = renderProbe()
+    await waitFor(() => expect(hookResult.snapshot?.appBalance).toBe(BALANCE[ACCOUNT_A]))
+
+    // Hold B's reads so the only thing that can clear A's data is the
+    // render-time ownership check.
+    gates.set(ACCOUNT_B.toLowerCase(), new Gate())
+
+    connectedAccount = ACCOUNT_B
+    await act(async () => { rerender() })
+    await settle()
+
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
+    // Every render that showed A's data had A connected.
+    expect(rendersShowing(ACCOUNT_A).every((record) => record.currentAccount === ACCOUNT_A)).toBe(true)
+    // And B's renders show nothing until B's own data arrives.
+    expect(rendered.filter((record) => record.currentAccount === ACCOUNT_B)
+      .every((record) => record.snapshot === undefined)).toBe(true)
+  })
+
+  it('never renders a disconnected wallet alongside the last account’s snapshot', async () => {
+    const { rerender } = renderProbe()
+    await waitFor(() => expect(hookResult.snapshot?.appBalance).toBe(BALANCE[ACCOUNT_A]))
+
+    connectedAccount = undefined
+    await act(async () => { rerender() })
+    await settle()
+
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
+    expect(rendered.filter((record) => record.currentAccount === undefined)
+      .every((record) => record.snapshot === undefined)).toBe(true)
+  })
+
   it('drops everything when the wallet disconnects mid-load', async () => {
     const gateA = new Gate()
     gates.set(ACCOUNT_A.toLowerCase(), gateA)
@@ -227,6 +286,7 @@ describe('account state isolation', () => {
 
     expect(hookResult.snapshot).toBeUndefined()
     expect(rendersShowing(ACCOUNT_A)).toEqual([])
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
   })
 
   it('drops a fully loaded account on disconnect', async () => {
@@ -257,12 +317,13 @@ describe('account state isolation', () => {
     expect(hookResult.snapshot?.recentActivity).toEqual([])
     expect(hookResult.snapshot?.friendCount).toBe(0n)
     expect(hookResult.activityError).toBeDefined()
-    expect(rendersShowing(ACCOUNT_A).every((snapshot) => snapshot?.appBalance === BALANCE[ACCOUNT_A])).toBe(true)
+    expect(rendersShowing(ACCOUNT_A).every((record) => record.currentAccount === ACCOUNT_A)).toBe(true)
     // No render mixed B's balance with A's lists.
-    expect(rendered.some((snapshot) =>
+    expect(rendered.some(({ snapshot }) =>
       snapshot?.appBalance === BALANCE[ACCOUNT_B]
       && snapshot.friends.some((friend) => friend.toLowerCase() === FRIEND_A.toLowerCase()),
     )).toBe(false)
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
   })
 
   it('still preserves the same account’s lists when its own Graph query fails', async () => {
@@ -309,5 +370,6 @@ describe('account state isolation', () => {
     expect(hookResult.snapshot?.recentActivity.map((item) => item.id)).toEqual([`activity-${ACCOUNT_B.toLowerCase()}`])
     expect(beforeStale?.appBalance).toBe(BALANCE[ACCOUNT_B])
     expect(rendersShowing(ACCOUNT_A)).toEqual([])
+    expect(mismatchedRenders(ACCOUNT_A)).toEqual([])
   })
 })
