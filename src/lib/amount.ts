@@ -26,6 +26,8 @@ export const USDC_AMOUNT_ERROR =
 
 export const INTEGER_AMOUNT_ERROR = 'Enter a whole number using digits only.'
 
+export const ZERO_AMOUNT_ERROR = 'Enter an amount greater than 0.'
+
 /**
  * Parses a USDC amount into base units (6 decimals).
  *
@@ -47,6 +49,28 @@ export function parseUsdcStrict(input: string | undefined): bigint | undefined {
   } catch {
     return undefined
   }
+}
+
+/** Either a usable amount, or the message to show the user. */
+export type AmountResult = { value: bigint; error?: undefined } | { value?: undefined; error: string }
+
+/**
+ * Parses a USDC amount that has to move value — deposits, withdrawals and the
+ * combined deposit-and-action calls.
+ *
+ * Zero is a valid decimal but never a valid transfer: it costs gas, moves
+ * nothing, and "0.000000" reaches the contract as the same 0 as "0". Rejecting
+ * it here keeps it away from the wallet entirely, rather than relying on the
+ * allowance check (which only covers the deposit side) or on the contract to
+ * revert.
+ *
+ * The strict decimal rules are unchanged: this only narrows the accepted range.
+ */
+export function parsePositiveUsdc(input: string | undefined): AmountResult {
+  const value = parseUsdcStrict(input)
+  if (value === undefined) return { error: USDC_AMOUNT_ERROR }
+  if (value <= 0n) return { error: ZERO_AMOUNT_ERROR }
+  return { value }
 }
 
 /**

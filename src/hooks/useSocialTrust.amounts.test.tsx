@@ -13,6 +13,8 @@ const readContract = vi.fn()
 const waitForTransactionReceipt = vi.fn()
 const getBlockNumber = vi.fn(async () => 200n)
 const writeContract = vi.fn()
+/** The first thing a write asks the wallet for, so it marks "reached the wallet". */
+const getChainId = vi.fn(async () => 31337)
 
 vi.mock('viem', async (importOriginal) => {
   const actual = await importOriginal<typeof import('viem')>()
@@ -26,7 +28,7 @@ vi.mock('wagmi', () => ({
   useAccount: () => ({ address: account, isConnected: true, chainId: 31337 }),
   useDisconnect: () => ({ disconnect: vi.fn() }),
   useSwitchChain: () => ({ switchChainAsync: vi.fn(async () => undefined) }),
-  useWalletClient: () => ({ data: { getChainId: async () => 31337, writeContract } }),
+  useWalletClient: () => ({ data: { getChainId, writeContract } }),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -53,6 +55,8 @@ vi.mock('../lib/config', async (importOriginal) => {
 })
 
 const { useSocialTrust } = await import('./useSocialTrust')
+
+type Actions = ReturnType<typeof useSocialTrust>['actions']
 
 /** Inputs that must never reach a contract call. */
 const REJECTED_AMOUNTS: [string, string][] = [
@@ -142,19 +146,6 @@ describe('USDC amount validation before a contract call', () => {
     expect(argsOf(writeContract.mock.calls[0][0])).toEqual([expected])
   })
 
-  it('parses zero, which the amount-greater-than-zero guard then refuses', async () => {
-    // Zero is a valid number — it is rejected by a range check further on, not
-    // by the parser, and still reaches no contract call.
-    const { result } = await renderLoadedHook()
-
-    let ok: unknown
-    await act(async () => { ok = await result.current.actions.deposit('0') })
-
-    expect(ok).toBe(false)
-    expect(writeContract).not.toHaveBeenCalled()
-    expect(result.current.tx.error).toBe('Enter an amount greater than zero.')
-  })
-
   it.each(REJECTED_AMOUNTS)('refuses to deposit %s, sending no transaction', async (_label, input) => {
     const { result } = await renderLoadedHook()
 
@@ -192,6 +183,94 @@ describe('USDC amount validation before a contract call', () => {
   })
 
   it('still rejects a bad address before looking at the amount', async () => {
+    const { result } = await renderLoadedHook()
+    await act(async () => { await result.current.actions.depositAndStakeForFriendship('nope', '10') })
+    expect(writeContract).not.toHaveBeenCalled()
+    expect(result.current.tx.error).toBe('Enter a valid wallet address.')
+  })
+})
+
+/**
+ * Zero parses as a perfectly valid decimal, so the strict parser lets it
+ * through. It is still never a transaction worth signing: it moves nothing and
+ * costs gas. Deposits used to be caught late, by the allowance check, and only
+ * after the wallet had been asked for its chain; withdrawals were not caught at
+ * all and sent a real zero-value transaction.
+ */
+describe('zero amounts are refused before any wallet or contract call', () => {
+  const ZERO_INPUTS: [string, string][] = [
+    ['0', '0'],
+    ['0.000000', '0.000000'],
+    ['0.0', '0.0'],
+    ['00', '00'],
+    ['surrounding whitespace', ' 0 '],
+  ]
+
+  const MOVERS: [string, (actions: Actions, amount: string) => Promise<boolean>][] = [
+    ['deposit', (actions, amount) => actions.deposit(amount)],
+    ['withdraw', (actions, amount) => actions.withdraw(amount)],
+    ['fundBonusPool', (actions, amount) => actions.fundBonusPool(amount)],
+    ['depositAndMatchMe', (actions, amount) => actions.depositAndMatchMe(amount)],
+    ['depositAndStakeForFriendship', (actions, amount) => actions.depositAndStakeForFriendship(other, amount)],
+  ]
+
+  for (const [action, run] of MOVERS) {
+    it.each(ZERO_INPUTS)(`refuses ${action} of %s`, async (_label, amount) => {
+      const { result } = await renderLoadedHook()
+
+      let ok: unknown
+      await act(async () => { ok = await run(result.current.actions, amount) })
+
+      expect(ok).toBe(false)
+      // Nothing was signed, and the wallet was never asked for its chain or
+      // for an approval on the way to being asked to sign.
+      expect(writeContract).not.toHaveBeenCalled()
+      expect(getChainId).not.toHaveBeenCalled()
+      expect(result.current.tx.pending).toBe(false)
+      expect(result.current.tx.success).toBeUndefined()
+      expect(result.current.tx.error).toBe('Enter an amount greater than 0.')
+    })
+
+    it(`still allows a positive ${action}`, async () => {
+      const { result } = await renderLoadedHook()
+
+      let ok: unknown
+      await act(async () => { ok = await run(result.current.actions, '0.000001') })
+
+      expect(ok).toBe(true)
+      expect(writeContract).toHaveBeenCalled()
+      expect(result.current.tx.error).toBeUndefined()
+    })
+  }
+
+  it('tells the user the amount is too small, not that the format is wrong', async () => {
+    const { result } = await renderLoadedHook()
+
+    await act(async () => { await result.current.actions.deposit('0') })
+    expect(result.current.tx.error).not.toMatch(/decimal places/)
+
+    // The strict decimal rules are untouched: a malformed amount still gets the
+    // formatting message rather than the zero one.
+    await act(async () => { await result.current.actions.deposit('1e3') })
+    expect(result.current.tx.error).toMatch(/up to 6 decimal places/)
+  })
+
+  it('leaves amounts that may legitimately be zero alone', async () => {
+    // A zero success fee, or a bonus payout of zero to switch bonuses off, are
+    // real settings rather than mistakes.
+    const { result } = await renderLoadedHook()
+
+    await act(async () => { await result.current.actions.setChallengeConfig({ ...VALID_CHALLENGE_CONFIG, friendshipSuccessFee: '0' }) })
+    expect(writeContract).toHaveBeenCalledOnce()
+
+    vi.clearAllMocks()
+    await act(async () => { await result.current.actions.setBonusConfig({ ...VALID_BONUS_CONFIG, maxBonusPerSuccess: '0' }) })
+    expect(writeContract).toHaveBeenCalledOnce()
+  })
+})
+
+describe('bad-address guards', () => {
+  it('rejects a bad address before looking at the amount', async () => {
     const { result } = await renderLoadedHook()
     await act(async () => { await result.current.actions.depositAndStakeForFriendship('nope', '10') })
     expect(writeContract).not.toHaveBeenCalled()
