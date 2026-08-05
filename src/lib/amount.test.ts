@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { formatUsdcPlain, parseIntegerStrict, parseUsdcStrict } from './amount'
+import {
+  USDC_AMOUNT_ERROR,
+  ZERO_AMOUNT_ERROR,
+  formatUsdcPlain,
+  parseIntegerStrict,
+  parsePositiveUsdc,
+  parseUsdcStrict,
+} from './amount'
 
 describe('parseUsdcStrict', () => {
   it('parses whole amounts', () => {
@@ -76,6 +83,45 @@ describe('parseUsdcStrict', () => {
   it('keeps full precision for amounts beyond Number.MAX_SAFE_INTEGER', () => {
     // No floating point anywhere in the path.
     expect(parseUsdcStrict('9007199254740993.123456')).toBe(9_007_199_254_740_993_123_456n)
+  })
+})
+
+describe('parsePositiveUsdc', () => {
+  it('accepts any positive amount the strict parser accepts', () => {
+    expect(parsePositiveUsdc('10')).toEqual({ value: 10_000_000n })
+    expect(parsePositiveUsdc('0.5')).toEqual({ value: 500_000n })
+    expect(parsePositiveUsdc('25.00')).toEqual({ value: 25_000_000n })
+    // One base unit is the smallest transfer that still moves something.
+    expect(parsePositiveUsdc('0.000001')).toEqual({ value: 1n })
+    expect(parsePositiveUsdc('  12.5  ')).toEqual({ value: 12_500_000n })
+  })
+
+  it('refuses zero however it is written', () => {
+    for (const input of ['0', '0.0', '0.00', '0.000000', '00', '  0  ']) {
+      expect(parsePositiveUsdc(input)).toEqual({ error: ZERO_AMOUNT_ERROR })
+    }
+  })
+
+  it('distinguishes an amount that is too small from one that is malformed', () => {
+    // A zero should not be told to check its decimal places.
+    expect(parsePositiveUsdc('0').error).toBe(ZERO_AMOUNT_ERROR)
+    expect(parsePositiveUsdc('1e3').error).toBe(USDC_AMOUNT_ERROR)
+    expect(parsePositiveUsdc('-1').error).toBe(USDC_AMOUNT_ERROR)
+    expect(parsePositiveUsdc('').error).toBe(USDC_AMOUNT_ERROR)
+  })
+
+  it('leaves the strict decimal rules exactly as they were', () => {
+    for (const input of ['1e3', 'Infinity', 'NaN', '-5', '+5', '1.1234567', '5.', '.5', '1.2.3', '1,234.50', 'abc', '$10', '', '   ']) {
+      expect(parsePositiveUsdc(input).value).toBeUndefined()
+      expect(parseUsdcStrict(input)).toBeUndefined()
+    }
+  })
+
+  it('reports either a value or an error, never both and never neither', () => {
+    for (const input of ['0', '10', 'abc', '']) {
+      const result = parsePositiveUsdc(input)
+      expect(result.value === undefined).toBe(result.error !== undefined)
+    }
   })
 })
 

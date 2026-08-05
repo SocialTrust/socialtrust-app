@@ -8,7 +8,7 @@ import { socialTrustProfilesAbi } from '../contracts/socialTrustProfilesAbi'
 import type { AccountProfile, ActivityItem, ChallengeView, ContractConfig, MatchQueueState, MatchSnapshot, MatchState, SocialProfile, TransactionState, UserSnapshot } from '../types'
 import { appConfig, configuredChain } from '../lib/config'
 import { isAddressLike, sameAddress, ZERO_ADDRESS } from '../lib/format'
-import { INTEGER_AMOUNT_ERROR, USDC_AMOUNT_ERROR, parseIntegerStrict, parseUsdcStrict } from '../lib/amount'
+import { INTEGER_AMOUNT_ERROR, USDC_AMOUNT_ERROR, parseIntegerStrict, parsePositiveUsdc, parseUsdcStrict } from '../lib/amount'
 import { PROFILE_IMAGE_ERROR, isAllowedProfileImageUrl } from '../lib/profileImage'
 import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
 import { isCurrentRequest as isCurrentRequestFor, ownedSnapshot } from '../lib/accountState'
@@ -1527,18 +1527,18 @@ export function useSocialTrust() {
   const actions = useMemo(() => ({
     approveUsdc: () => write('approveUsdc', [], 'Approve USDC'),
     deposit: async (amount: string) => {
-      const value = parseUsdcStrict(amount)
-      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      const { value, error } = parsePositiveUsdc(amount)
+      if (error) return failValidation(error)
       return write('deposit', [value], 'Deposit USDC')
     },
     withdraw: async (amount: string) => {
-      const value = parseUsdcStrict(amount)
-      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      const { value, error } = parsePositiveUsdc(amount)
+      if (error) return failValidation(error)
       return write('withdraw', [value], 'Withdraw USDC')
     },
     fundBonusPool: async (amount: string) => {
-      const value = parseUsdcStrict(amount)
-      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      const { value, error } = parsePositiveUsdc(amount)
+      if (error) return failValidation(error)
       return write('fundBonusPool', [value], 'Fund bonus pool')
     },
     stakeForFriendship: async (other: string) => {
@@ -1547,8 +1547,8 @@ export function useSocialTrust() {
     },
     depositAndStakeForFriendship: async (other: string, amount: string) => {
       if (!isAddressLike(other)) return failValidation('Enter a valid wallet address.')
-      const value = parseUsdcStrict(amount)
-      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      const { value, error } = parsePositiveUsdc(amount)
+      if (error) return failValidation(error)
       return write('depositAndStakeForFriendship', [other, value], 'Deposit and stake')
     },
     cancelPendingStake: (other: Address) => write('cancelPendingStake', [other], 'Cancel pending stake'),
@@ -1557,8 +1557,8 @@ export function useSocialTrust() {
     finalizeFriendship: (other: Address) => write('finalizeFriendship', [other], 'Finalize friendship'),
     matchMe: () => write('matchMe', [], 'Find a match'),
     depositAndMatchMe: async (amount: string) => {
-      const value = parseUsdcStrict(amount)
-      if (value === undefined) return failValidation(USDC_AMOUNT_ERROR)
+      const { value, error } = parsePositiveUsdc(amount)
+      if (error) return failValidation(error)
       return write('depositAndMatchMe', [value], 'Deposit and find match')
     },
     cancelMatchMe: () => write('cancelMatchMe', [], 'Cancel matchmaking'),
