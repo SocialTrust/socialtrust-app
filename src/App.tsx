@@ -36,6 +36,8 @@ function App() {
     isLoading,
     isOwner,
     wrongNetwork,
+    isConfigured,
+    configProblems,
     config,
     snapshot,
     activityError,
@@ -146,6 +148,36 @@ function App() {
       </span>
     </div>
   ) : null
+
+  // A deployment missing its core addresses or chain id cannot do anything
+  // safely: no reads, no wallet, no writes. It says so plainly instead of
+  // rendering an app shell that would imply otherwise.
+  if (!isConfigured) {
+    return (
+      <div className="app">
+        <TopBar left={<span className="brandWordmark">SocialTrust</span>} />
+        <main className="appMain">
+          <div className="pageStack">
+            <section className="emptyPanel emptyPanelError">
+              <h2>Configuration required</h2>
+              <p>
+                This deployment is missing required settings, so SocialTrust cannot read the contract or connect a
+                wallet. Set the following environment variables and redeploy.
+              </p>
+              <ul className="configProblemList">
+                {configProblems.map((problem) => (
+                  <li key={problem.variable}>
+                    <code>{problem.variable}</code>
+                    <span>{problem.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   const header = (() => {
     if (route.name === 'home') {

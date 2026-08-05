@@ -48,7 +48,8 @@ vi.mock('./lib/config', async (importOriginal) => {
       profilesAddress,
       chainId: 31337,
       chainName: 'Test Chain',
-      isMockMode: false,
+      isConfigured: true,
+      configProblems: [],
       hasProfiles: true,
       graphEnabled: true,
       graphUrl: 'https://graph.test/query',
@@ -193,6 +194,15 @@ async function renderApp() {
 }
 
 describe('App shell navigation', () => {
+  it('runs the normal app, with no configuration error, when the deployment is configured', async () => {
+    await renderApp()
+    expect(screen.queryByRole('heading', { name: 'Configuration required' })).toBeNull()
+    expect(screen.queryByText(/VITE_/)).toBeNull()
+    // Real contract data, read from the chain rather than fabricated.
+    expect(await screen.findByRole('heading', { name: 'Ready to build trust?' })).toBeTruthy()
+    expect(readContract).toHaveBeenCalled()
+  })
+
   it('opens Home with the matchmaking hero and the Home tab selected', async () => {
     await renderApp()
     expect(await screen.findByRole('heading', { name: 'Ready to build trust?' })).toBeTruthy()

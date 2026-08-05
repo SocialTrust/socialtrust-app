@@ -10,7 +10,6 @@ import { appConfig, configuredChain } from '../lib/config'
 import { isAddressLike, sameAddress, ZERO_ADDRESS } from '../lib/format'
 import { INTEGER_AMOUNT_ERROR, USDC_AMOUNT_ERROR, parseIntegerStrict, parseUsdcStrict } from '../lib/amount'
 import { PROFILE_IMAGE_ERROR, isAllowedProfileImageUrl } from '../lib/profileImage'
-import { mockConfig, mockProfile, mockRecentActivity, mockSnapshot, mockUser } from '../lib/mock'
 import { acceptMatchSnapshot, startMatchPolling, type AccountMatchSnapshot } from '../lib/matchmakingState'
 import { isCurrentRequest as isCurrentRequestFor, ownedSnapshot } from '../lib/accountState'
 
@@ -116,6 +115,15 @@ function successMessage(action: ActionName, args: readonly unknown[]) {
   return 'Transaction confirmed.'
 }
 
+
+/**
+ * The message shown when the deployment itself is broken. It names the
+ * variables so a deployer can act on it without reading the source.
+ */
+function configurationError() {
+  const variables = appConfig.configProblems.map((problem) => problem.variable).join(', ')
+  return `SocialTrust is not configured. Set ${variables} and redeploy.`
+}
 
 function walletConnectionError() {
   if (!appConfig.walletConnectProjectId) {
@@ -407,15 +415,15 @@ export function useSocialTrust() {
   const { data: walletClient } = useWalletClient({ chainId: appConfig.chainId })
   const { openConnectModal } = useConnectModal()
 
-  const [snapshot, setSnapshot] = useState<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
-  const snapshotRef = useRef<UserSnapshot | undefined>(appConfig.isMockMode ? mockSnapshot : undefined)
+  const [snapshot, setSnapshot] = useState<UserSnapshot | undefined>(undefined)
+  const snapshotRef = useRef<UserSnapshot | undefined>(undefined)
   // Which account the snapshot above describes. Without this, "is there a
   // snapshot?" and "is it this wallet's snapshot?" are the same question, and
   // a slow response for the previous wallet can merge into the current one.
-  const snapshotAccountRef = useRef<Address | undefined>(appConfig.isMockMode ? mockUser : undefined)
+  const snapshotAccountRef = useRef<Address | undefined>(undefined)
   const snapshotLoadSeqRef = useRef(0)
   const matchSnapshotRef = useRef<AccountMatchSnapshot | undefined>(undefined)
-  const [config, setConfig] = useState<ContractConfig | undefined>(appConfig.isMockMode ? mockConfig : undefined)
+  const [config, setConfig] = useState<ContractConfig | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(false)
   const [tx, setTx] = useState<TransactionState>({ pending: false, label: '' })
   // Surfaces an indexer failure to the Activity screen instead of letting an
@@ -423,13 +431,13 @@ export function useSocialTrust() {
   const [activityError, setActivityError] = useState<string | undefined>()
 
   const connectedWallet = wagmiAddress as Address | undefined
-  const account = connectedWallet ?? (appConfig.isMockMode ? mockUser : undefined)
+  const account = connectedWallet
   const accountRef = useRef<Address | undefined>(account)
   // Update during render, rather than waiting for an effect, so a promise that
   // settles in the account-switch commit window already sees the new identity.
   accountRef.current = account
   const graphPollSeqRef = useRef(0)
-  const isConnected = wagmiIsConnected || appConfig.isMockMode
+  const isConnected = wagmiIsConnected
 
   /**
    * The snapshot as this render may use it: the stored one only when its
@@ -444,7 +452,7 @@ export function useSocialTrust() {
   const ownedSnapshotForRender = ownedSnapshot(snapshot, snapshotAccountRef.current, account)
 
   const isOwner = Boolean(account && config?.owner && sameAddress(account, config.owner))
-  const wrongNetwork = Boolean(!appConfig.isMockMode && isConnected && typeof chainId === 'number' && chainId !== appConfig.chainId)
+  const wrongNetwork = Boolean(appConfig.isConfigured && isConnected && typeof chainId === 'number' && chainId !== appConfig.chainId)
 
   /**
    * Every account-derived value, dropped at once.
@@ -458,9 +466,9 @@ export function useSocialTrust() {
     snapshotLoadSeqRef.current += 1
     graphPollSeqRef.current += 1
     matchSnapshotRef.current = undefined
-    snapshotRef.current = appConfig.isMockMode ? mockSnapshot : undefined
-    snapshotAccountRef.current = appConfig.isMockMode ? mockUser : undefined
-    setSnapshot(appConfig.isMockMode ? mockSnapshot : undefined)
+    snapshotRef.current = undefined
+    snapshotAccountRef.current = undefined
+    setSnapshot(undefined)
     setActivityError(undefined)
   }, [])
 
@@ -671,11 +679,6 @@ export function useSocialTrust() {
   }, [])
 
   const readSocialProfile = useCallback(async (user: Address, blockNumber?: bigint): Promise<SocialProfile> => {
-    if (appConfig.isMockMode) {
-      return user.toLowerCase() === mockUser.toLowerCase()
-        ? { displayName: 'Jamie', xUsername: 'jamie_judd', telegramUsername: 'jamiejudd', discordUsername: '', imgUrl: '', exists: true }
-        : { ...emptySocialProfile }
-    }
     if (!appConfig.hasProfiles) return emptySocialProfile
 
     const result = await publicClient.readContract({
@@ -700,7 +703,7 @@ export function useSocialTrust() {
       .map((user) => users.find((candidate) => candidate.toLowerCase() === user)!)
 
     if (unique.length === 0) return {}
-    if (appConfig.isMockMode || !appConfig.hasProfiles) {
+    if (!appConfig.hasProfiles) {
       const entries = await Promise.all(unique.map(async (user) => [user.toLowerCase(), await readSocialProfileForgiving(user)] as const))
       return Object.fromEntries(entries)
     }
@@ -721,7 +724,6 @@ export function useSocialTrust() {
   }, [normalizeSocialProfile, readSocialProfileForgiving])
 
   const ensureWalletChain = useCallback(async () => {
-    if (appConfig.isMockMode) return
     if (!isConnected) throw new Error('Connect your wallet first.')
     if (!walletClient) throw new Error('Connect your wallet first.')
 
@@ -752,11 +754,8 @@ export function useSocialTrust() {
 
 
   const loadConfig = useCallback(async () => {
-    if (appConfig.isMockMode) {
-      setConfig(mockConfig)
-      return mockConfig
-    }
-    if (appConfig.contractAddress.toLowerCase() === ZERO_ADDRESS) return undefined
+    // Nothing to read from, and nothing to invent in its place.
+    if (!appConfig.isConfigured) return undefined
 
     const [
       stakeAmt,
@@ -951,13 +950,6 @@ export function useSocialTrust() {
   }, [readGraphState, refreshGraphStateOnly])
 
   const loadSnapshot = useCallback(async (user: Address, _options: { refreshActivity?: boolean } = {}) => {
-    if (appConfig.isMockMode) {
-      snapshotRef.current = mockSnapshot
-      snapshotAccountRef.current = mockUser
-      setSnapshot(mockSnapshot)
-      return mockSnapshot
-    }
-
     const requestId = snapshotLoadSeqRef.current + 1
     snapshotLoadSeqRef.current = requestId
     // Only this account's own snapshot may seed anything below. A snapshot
@@ -1050,6 +1042,7 @@ export function useSocialTrust() {
   }, [applyMatchSnapshot, commitSnapshot, isCurrentRequest, readContract, readErc20, readGraphState, readMatchStateOnChain, readSocialProfile, readSocialProfiles, snapshotFor])
 
   const refresh = useCallback(async () => {
+    if (!appConfig.isConfigured) return
     setIsLoading(true)
     try {
       await loadConfig()
@@ -1068,7 +1061,7 @@ export function useSocialTrust() {
   // Another account can complete the match, so queued users follow Base's head.
   // Recursive timeouts ensure slow RPC calls never overlap.
   useEffect(() => {
-    if (!account || !ownedSnapshotForRender?.currentQueueEntry || appConfig.isMockMode) return
+    if (!account || !ownedSnapshotForRender?.currentQueueEntry) return
     const pollingAccount = account
     return startMatchPolling({
       shouldContinue: () => Boolean(accountRef.current && sameAddress(accountRef.current, pollingAccount) && matchSnapshotRef.current?.currentQueueEntry),
@@ -1082,7 +1075,6 @@ export function useSocialTrust() {
   // ensureWalletChain() and request the switch only when the user starts an action.
 
   const switchToAppNetwork = useCallback(async () => {
-    if (appConfig.isMockMode) return
     try {
       await switchChainAsync({ chainId: appConfig.chainId })
     } catch {
@@ -1097,8 +1089,9 @@ export function useSocialTrust() {
   }, [clearAccountState, wagmiDisconnect])
 
   const connect = useCallback(() => {
-    if (appConfig.isMockMode) {
-      setTx({ pending: false, label: '', success: 'Mock wallet connected.' })
+    // A misconfigured deployment has nothing to connect to.
+    if (!appConfig.isConfigured) {
+      setTx({ pending: false, label: '', error: configurationError() })
       return
     }
 
@@ -1112,8 +1105,6 @@ export function useSocialTrust() {
 
 
   const readAccountProfile = useCallback(async (profileAddress: Address): Promise<AccountProfile> => {
-    if (appConfig.isMockMode) return mockProfile(profileAddress)
-
     const graphStatePromise = readGraphState(profileAddress).catch((error) => {
       console.warn('The Graph public account query failed.', error)
       return { challenges: [] as ChallengeView[], friends: [] as Address[], recentActivity: [] as ActivityItem[] }
@@ -1448,9 +1439,10 @@ export function useSocialTrust() {
   }, [pollGraphForTransaction, refreshAfterWrite, refreshCoreStateOnly, refreshMatchStateOnly, refreshSocialProfileOnly, retryBalanceAndMatchAfterWrite, retryCoreStateAfterWrite])
 
   const write = useCallback(async (action: ActionName, args: readonly unknown[] = [], label = 'Confirm transaction'): Promise<boolean> => {
-    if (appConfig.isMockMode) {
-      setTx({ pending: false, label: '', success: `${label} simulated in mock mode.` })
-      return true
+    // Fail closed before anything reaches a wallet: no contract to write to.
+    if (!appConfig.isConfigured) {
+      setTx({ pending: false, label: '', error: configurationError() })
+      return false
     }
     if (!account) {
       setTx({ pending: false, label: '', error: 'Connect your wallet first.' })
@@ -1653,7 +1645,8 @@ export function useSocialTrust() {
     account,
     connectedWallet,
     isConnected,
-    isMockMode: appConfig.isMockMode,
+    isConfigured: appConfig.isConfigured,
+    configProblems: appConfig.configProblems,
     isLoading,
     isOwner,
     wrongNetwork,
